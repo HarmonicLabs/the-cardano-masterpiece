@@ -8,8 +8,8 @@ import { DataConstr, DataB, DataI, DataMap, DataPair, DataList, Hash28, UTxO } f
 import { sha2_256_sync } from "@harmoniclabs/crypto";
 import {
     config, CANVAS_W, ROWS_PER_LEAF, N_LEAFS, utxosAt, amountOf, asConstr, asBytes, hexToBytes, bytesToHex,
-} from "./chain.ts";
-import { PALETTE } from "./palette.ts";
+} from "./chain.js";
+import { PALETTE } from "./palette.js";
 
 const CHUNK_SIZE = CANVAS_W * ROWS_PER_LEAF;   // 12096
 const ascii = (s: string): Uint8Array => new TextEncoder().encode(s);

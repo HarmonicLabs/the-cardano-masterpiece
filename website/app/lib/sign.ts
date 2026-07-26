@@ -1,5 +1,5 @@
 import type { WalletApi } from "@harmoniclabs/use-cardano-wallet";
-import { submitTx } from "./api.ts";
+import { submitTx } from "./api.js";
 
 /** sign an unsigned tx (cbor hex) with the CIP-30 wallet and submit via the API */
 export async function signAndSubmit(api: WalletApi, txHex: string): Promise<string> {

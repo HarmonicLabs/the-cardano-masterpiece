@@ -10,8 +10,8 @@
 import { sha2_256_sync } from "@harmoniclabs/crypto";
 import { CarWriter } from "@ipld/car";
 import { CID } from "multiformats/cid";
-import { PALETTE } from "../app/lib/palette.ts";
-import { chainState } from "./_core.ts";
+import { PALETTE } from "../app/lib/palette.js";
+import { chainState } from "./_core.js";
 
 // geometry — MUST match src/masterpiece.pebble (mirrored in _core.ts too)
 const N_LEAFS = 84, LINE_LENGTH = 1008, ROWS_PER_LEAF = 12;

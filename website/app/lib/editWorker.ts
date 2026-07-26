@@ -4,8 +4,8 @@
 //  locally over a 14 KB chunk) is assembled. Driven by editWorkerClient.ts.
 // ===========================================================================
 /// <reference lib="webworker" />
-import { buildEditBatchTxsFromCbor } from "./editBuild.ts";
-import type { PixelEdit } from "./api.ts";
+import { buildEditBatchTxsFromCbor } from "./editBuild.js";
+import type { PixelEdit } from "./api.js";
 
 interface Req {
     nonce: number;

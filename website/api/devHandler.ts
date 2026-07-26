@@ -17,7 +17,7 @@ import {
     buildMarketListTx, buildMarketBuyTx, buildMarketPartialBuyTx,
     buildMarketCancelTx, buildMarketRequestTx, buildMarketFillTx,
     type Rect, type PixelEdit,
-} from "./_core.ts";
+} from "./_core.js";
 
 function send(res: ServerResponse, code: number, body: Uint8Array | string, type: string): void {
     res.writeHead(code, {

@@ -13,7 +13,7 @@
 //  center-cropped.
 // ===========================================================================
 import { deflateSync } from "node:zlib";
-import { PALETTE } from "../app/lib/palette.ts";
+import { PALETTE } from "../app/lib/palette.js";
 
 const SRC = 1008;                    // source canvas is SRC x SRC palette indices
 export const OG_W = 1926;            // ~1.91:1 landscape target (X card ratio)

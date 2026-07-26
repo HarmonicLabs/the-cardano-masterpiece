@@ -9,8 +9,8 @@
 //  unavailable or errors.
 // ===========================================================================
 import type { WalletApi } from "@harmoniclabs/use-cardano-wallet";
-import type { PixelEdit } from "./api.ts";
-import { buildEditBatchTxs } from "./txbuild.ts";
+import type { PixelEdit } from "./api.js";
+import { buildEditBatchTxs } from "./txbuild.js";
 
 export type EditGroup = { leafIdx: number; pixels: PixelEdit[] };
 

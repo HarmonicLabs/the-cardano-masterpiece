@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { chainState } from "./_core.ts";
-import { preflight, send, fail } from "./_http.ts";
+import { chainState } from "./_core.js";
+import { preflight, send, fail } from "./_http.js";
 
 // served at /canvas.bin via a rewrite in vercel.json
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {

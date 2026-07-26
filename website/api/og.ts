@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { chainState } from "./_core.ts";
-import { renderOgPng } from "./ogImage.ts";
-import { preflight, send, fail } from "./_http.ts";
+import { chainState } from "./_core.js";
+import { renderOgPng } from "./ogImage.js";
+import { preflight, send, fail } from "./_http.js";
 
 // served at /og.png via a rewrite in vercel.json — the live collective canvas
 // as a social-preview image (Open Graph / Twitter card). Cached 5 min at the

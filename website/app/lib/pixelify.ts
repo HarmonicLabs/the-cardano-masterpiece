@@ -4,7 +4,7 @@
 //  plus an opacity mask; it can be previewed/dragged on the board (claim
 //  page) and later applied as pixel edits (edit page).
 // ===========================================================================
-import { PALETTE, nearestIndex } from "./palette.ts";
+import { PALETTE, nearestIndex } from "./palette.js";
 
 export interface Sprite {
     w: number;

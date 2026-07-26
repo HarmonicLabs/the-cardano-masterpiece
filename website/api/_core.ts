@@ -17,15 +17,19 @@
 // Shared server-side logic — chain reads, datum parsing, tx builders,
 // blockfrost submit. Used by the local dev server (server.ts) AND the Vercel
 // serverless functions (api/*). No http/static concerns live here.
-import "./_env.ts";   // MUST be first: loads .env.local into process.env for local dev
+import "./_env.js";   // MUST be first: loads .env.local into process.env for local dev
 import {
     Address, Value, Hash28, Tx, TxBuilder, TxWitnessSet, UTxO, TxOutRef,
     DataConstr, DataB, DataI, DataList, defaultPreprodGenesisInfos,
     type Data, type ITxBuildArgs,
 } from "@harmoniclabs/buildooor";
 import { BlockfrostPluts } from "@harmoniclabs/blockfrost-pluts";
-import { deedCip25 } from "../app/lib/deedImage.ts";
-import configJson from "../config.json";
+import { readFileSync } from "node:fs";
+import { deedCip25 } from "../app/lib/deedImage.js";
+// config.json is loaded via fs (not an ESM `import … from "*.json"`) so the
+// serverless function — compiled per-file to native ESM by Vercel — needs no
+// JSON import attribute; @vercel/nft traces this and bundles the file.
+const configJson = JSON.parse(readFileSync(new URL("../config.json", import.meta.url), "utf8"));
 
 export { Tx, TxWitnessSet };
 

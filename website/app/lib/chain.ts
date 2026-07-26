@@ -14,7 +14,7 @@ import { BlockfrostPluts } from "@harmoniclabs/blockfrost-pluts";
 import { sha2_256_sync } from "@harmoniclabs/crypto";
 import type { WalletApi } from "@harmoniclabs/use-cardano-wallet";
 import config from "../../config.json";
-import type { Rect } from "./api.ts";
+import type { Rect } from "./api.js";
 
 export { config };
 

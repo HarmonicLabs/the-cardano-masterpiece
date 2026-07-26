@@ -14,8 +14,8 @@
 //    FILEBASE_KEY / FILEBASE_SECRET / FILEBASE_BUCKET
 // ===========================================================================
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { buildCommittedCar } from "./imageCar.ts";
-import { putCar, headCid } from "./filebase.ts";
+import { buildCommittedCar } from "./imageCar.js";
+import { putCar, headCid } from "./filebase.js";
 
 // one fixed key: overwriting it replaces + unpins the previous committed image
 const OBJECT_KEY = "committed-image.car";

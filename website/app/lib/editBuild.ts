@@ -6,13 +6,13 @@
 //  same-origin /bf proxy the worker can reach.
 // ===========================================================================
 import { Address, Value, UTxO, TxOutRef, type Tx } from "@harmoniclabs/buildooor";
-import type { PixelEdit, Rect } from "./api.ts";
+import type { PixelEdit, Rect } from "./api.js";
 import {
     config, CANVAS, ROWS_PER_LEAF, N_LEAFS,
     txBuilder, refScripts, leafAt, pickFunding,
     tokens, lovelacesOf, bytesToHex, leafDatum, cidV1Raw, mpEdit,
-} from "./chain.ts";
-import { rootDatum, mpCommit, sortedRefIndex, fetchRoot } from "./masterpieceRoot.ts";
+} from "./chain.js";
+import { rootDatum, mpCommit, sortedRefIndex, fetchRoot } from "./masterpieceRoot.js";
 
 export const EMPTY_NAME = new Uint8Array(0);
 export const NAME_RE = /^masterpiece-(\d+)-(\d+)-(\d+)-(\d+)$/;

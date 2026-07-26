@@ -8,7 +8,7 @@
 // ===========================================================================
 import { Address, Value, UTxO, TxOutRef, type Tx } from "@harmoniclabs/buildooor";
 import type { WalletApi } from "@harmoniclabs/use-cardano-wallet";
-import type { MarketListing, MarketRequest, PixelEdit, Rect } from "./api.ts";
+import type { MarketListing, MarketRequest, PixelEdit, Rect } from "./api.js";
 import {
     config, ROWS_PER_LEAF, MIN_LISTING_LOVELACE, MIN_LOVELACE_PER_PIXEL,
     txBuilder, refScripts, walletFunding, walletDeed, marketUtxo, lovelacesOf,
@@ -18,15 +18,15 @@ import {
     oClaim, oOwnerClaim, oMintFree, oMintCarve, oPriceChange,
     mBuy, mPartialBuy, mListingCancel, mFill, mRequestCancel,
     asConstr, type FreeNode,
-} from "./chain.ts";
-import { deedCip25 } from "./deedImage.ts";
-import type { PlacedSprite } from "./pixelify.ts";
-import { staleLeaves } from "./masterpieceRoot.ts";
+} from "./chain.js";
+import { deedCip25 } from "./deedImage.js";
+import type { PlacedSprite } from "./pixelify.js";
+import { staleLeaves } from "./masterpieceRoot.js";
 // the edit-tx core lives in a DOM-free module shared with the prebuilder worker
 import {
     EMPTY_NAME, NAME_RE, toHex, chainChange, buildOneEdit, buildCommitTxs, leafOutputOf,
     buildEditBatchTxsFromCbor, type Plot, type EditedLeaf,
-} from "./editBuild.ts";
+} from "./editBuild.js";
 
 const rectIntersect = (a: Rect, b: Rect): Rect | null => {
     const x0 = Math.max(a.x0, b.x0), y0 = Math.max(a.y0, b.y0);

@@ -2,7 +2,7 @@
 // Handlers are typed with Node's http types; Vercel's Node runtime passes
 // compatible objects, so no @vercel/node dependency is needed.
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { jsonReplacer } from "./_core.ts";
+import { jsonReplacer } from "./_core.js";
 
 const CORS = {
     "access-control-allow-origin": "*",

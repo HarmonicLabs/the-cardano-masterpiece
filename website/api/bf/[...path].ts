@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { BLOCKFROST_URL, bfHeaders } from "../_core.ts";
-import { preflight, send, fail, readRawBody } from "../_http.ts";
+import { BLOCKFROST_URL, bfHeaders } from "../_core.js";
+import { preflight, send, fail, readRawBody } from "../_http.js";
 
 // vercel.json rewrites /bf/:path* -> /api/bf/:path*, so req.url here is
 // /api/bf/<path>?<query>. Strip the /api/bf prefix to get the blockfrost path.
