@@ -2,13 +2,11 @@ import { useEffect, useState } from "react";
 import { CanvasBoard } from "../components/CanvasBoard.tsx";
 import { fetchPixels, fetchState, type CanvasStateInfo } from "../lib/api.ts";
 
-// CIP-68 (222) user token for the root "masterpiece" NFT.
-const ROOT_USER_ASSET_NAME = "000de1406d61737465727069656365";
 // pool.pm (mainnet) renders the CIP-68 image inline — it resolves the (222) user
-// token's (100) reference metadata and shows the actual masterpiece. Its canonical
-// deep-link form is `<policyId>.<assetNameHex>`.
-const poolPmAsset = (policy: string, nameHex: string) =>
-    `https://pool.pm/${policy}.${nameHex}`;
+// token's (100) reference metadata and shows the actual masterpiece. Link by the
+// CIP-14 asset fingerprint (its `<policy>.<name>` form 404s). The root NFT is a
+// fixed, immutable asset, so this fingerprint never changes.
+const ROOT_NFT_URL = "https://pool.pm/asset1n2r84er8pra9apczkznh0ftjwrtr4kaejk4qr8";
 // Resolve ipfs:// to an HTTP gateway (not all browsers speak ipfs:// natively).
 // Link TEXT stays `ipfs://<cid>`; only the href points at the gateway.
 const ipfsGateway = (uri: string) =>
@@ -50,8 +48,7 @@ export function Landing() {
                             </a>
                         </p>}
                     <p className="uri">
-                        <a href={poolPmAsset(state.masterpiecePolicy, ROOT_USER_ASSET_NAME)}
-                           target="_blank" rel="noreferrer">
+                        <a href={ROOT_NFT_URL} target="_blank" rel="noreferrer">
                             view the NFT on pool.pm ↗
                         </a>
                     </p>
