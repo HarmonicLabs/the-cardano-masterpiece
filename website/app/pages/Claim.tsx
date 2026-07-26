@@ -6,9 +6,10 @@ import {
     fetchFree, fetchMarket, fetchPixels, fetchState, lovelaceToAda, notifyPublish,
     type CanvasStateInfo, type FreeArea, type MarketListing, type Rect,
 } from "../lib/api.ts";
-import { buildClaimTxs, buildMarketPartialBuyTx, buildSetPriceTx } from "../lib/txbuild.ts";
+import { buildAcquireTxs, buildSetPriceTx } from "../lib/txbuild.ts";
 import { CANVAS_W as W, CANVAS_H as H, isProtocolOwner } from "../lib/chain.ts";
-import { signAndSubmit, signAndSubmitAll } from "../lib/sign.ts";
+import { signAndSubmit, signAndSubmitAll, hasBulkSigner, type SignProgress } from "../lib/sign.ts";
+import { TxProgress } from "../components/TxProgress.tsx";
 import {
     loadImage, pixelify, saveSprite, loadSavedSprite, clearSavedSprite,
     type PlacedSprite,
@@ -39,6 +40,7 @@ export function Claim() {
     const [result, setResult] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [newPriceAda, setNewPriceAda] = useState("");
+    const [signProg, setSignProg] = useState<SignProgress | null>(null);
 
     const isOwner = address != null && isProtocolOwner(address);
     async function setPrice() {
@@ -56,7 +58,7 @@ export function Claim() {
             await refresh();
         } catch (e) {
             setError(String((e as Error).message ?? e));
-        } finally { setBusy(null); }
+        } finally { setBusy(null); setSignProg(null); }
     }
 
     // imported-image preview
@@ -221,51 +223,43 @@ export function Claim() {
     const claimRect: Rect | null = sprite
         ? { x0: sprite.x, y0: sprite.y, x1: sprite.x + sprite.w, y1: sprite.y + sprite.h }
         : sel;
-    // a claim may span several unclaimed areas (one tx each) but no pixel of
-    // it may be claimed already; free areas tile disjointly, so coverage is
-    // exact iff the intersection areas add up to the whole rect
-    const spanned = claimRect ? free.filter((f) => intersectArea(f.rect, claimRect) > 0) : [];
-    const fullyFree = claimRect != null
-        && spanned.reduce((s, f) => s + intersectArea(f.rect, claimRect), 0) === area(claimRect);
-    // alternatively the selection may sit entirely inside ONE listed plot:
-    // then it is bought from the seller instead of claimed from free space
-    // (a partial buy carves the listed deed in the same tx if needed)
-    const listing = !fullyFree && claimRect
-        ? listings.find((l) => contains(l.rect, claimRect))
-        : undefined;
-    const buyable = fullyFree || listing != null;
-    // the protocol owner claims free space at no cost (dedicated `ownerClaim`
-    // redeemer); buying a listed plot still costs the seller's price
-    const ownerFree = fullyFree && listing == null && address != null && isProtocolOwner(address);
-    const price = claimRect == null ? null
-        : ownerFree ? 0n
-        : listing != null ? BigInt(listing.pricePerPixel) * BigInt(area(claimRect))
-        : state != null ? BigInt(area(claimRect)) * BigInt(state.pricePerPixelLovelace)
-        : null;
+    // The selection may span FREE areas (claimed from free space) AND LISTED
+    // areas (bought from the marketplace) — both are acquired in one batch.
+    // Free areas tile disjointly and never overlap listings, so the whole rect
+    // is available iff (free ∩ sel) + (listed ∩ sel) covers it exactly.
+    const freeCover = claimRect ? free.reduce((s, f) => s + intersectArea(f.rect, claimRect), 0) : 0;
+    const listedCover = claimRect ? listings.reduce((s, l) => s + intersectArea(l.rect, claimRect), 0) : 0;
+    const buyable = claimRect != null && freeCover + listedCover === area(claimRect);
+    const fullyFree = claimRect != null && listedCover === 0 && freeCover === area(claimRect);
+    // the protocol owner claims free space at no cost; buying LISTED plots still
+    // costs the seller's price (even for the owner)
+    const ownerFree = fullyFree && isOwner;
+    const price = !buyable || claimRect == null ? null : (() => {
+        const ownerPP = state != null ? BigInt(state.pricePerPixelLovelace) : 0n;
+        let total = isOwner ? 0n : BigInt(freeCover) * ownerPP;         // the free portion
+        for (const l of listings) {                                     // the listed portions
+            const ia = intersectArea(l.rect, claimRect);
+            if (ia > 0) total += BigInt(ia) * BigInt(l.pricePerPixel);
+        }
+        return total;
+    })();
+    const hasListed = listedCover > 0;
+    const freePartCount = claimRect ? free.filter((f) => intersectArea(f.rect, claimRect) > 0).length : 0;
+    const listedPartCount = claimRect ? listings.filter((l) => intersectArea(l.rect, claimRect) > 0).length : 0;
+    const pieceCount = freePartCount + listedPartCount;
+    const canMerge = api != null && hasBulkSigner(api);
 
     async function claim() {
-        if (!claimRect || !api || !address) return;
-        // a placed image is painted AND committed in the same batch (buildClaimTxs)
-        const willCommit = !listing && !!sprite;
+        if (!claimRect || !api || !address || !buyable) return;
+        const willCommit = !!sprite;
         setError(null); setResult(null);
         try {
-            if (listing) {
-                setBusy("building purchase…");
-                const tx = await buildMarketPartialBuyTx(api, address, listing, claimRect);
-                setBusy("waiting for wallet signature…");
-                const hash = await signAndSubmit(api, tx);
-                setResult(hash);
-            } else {
-                setBusy("building transaction(s)…");
-                // when an image is placed, its pixels are painted in the SAME
-                // chained batch (claim txs, then one edit tx per leaf)
-                const txs = await buildClaimTxs(api, address, claimRect, sprite ?? undefined);
-                // chained batch (each tx spends the previous one's change):
-                // one CIP-103 prompt when supported, in-order submission always
-                const hashes = await signAndSubmitAll(api, txs, setBusy);
-                setResult(hashes[hashes.length - 1]);
-            }
-            // the image was painted inline; drop the persisted pending edit
+            setBusy("building transaction(s)…");
+            // claim the free parts + buy the listed parts, then (if the wallet
+            // can bulk-sign) merge everything into one deed, then paint + commit
+            const txs = await buildAcquireTxs(api, address, claimRect, listings, sprite ?? undefined, hasBulkSigner(api));
+            const hashes = await signAndSubmitAll(api, txs, setSignProg);
+            setResult(hashes[hashes.length - 1]);
             if (sprite) { clearSavedSprite(); setResumed(false); }
             setSel(null);
             setBusy("waiting for confirmation…");
@@ -275,12 +269,13 @@ export function Claim() {
         } catch (e) {
             setError(String((e as Error).message ?? e));
         } finally {
-            setBusy(null);
+            setBusy(null); setSignProg(null);
         }
     }
 
     return (
         <section>
+            <TxProgress p={signProg} />
             <div className="pagehead">
                 <h2>Claim</h2>
                 <p className="tagline">
@@ -372,31 +367,36 @@ export function Claim() {
                         &nbsp;({area(claimRect)} px{price != null && <> — <b>{ownerFree ? "free (owner)" : `${lovelaceToAda(price)} ₳`}</b></>})
                     </span>
                 )}
-                {claimRect && !buyable && <span className="err">overlaps claimed pixels that are not for sale</span>}
-                {claimRect && fullyFree && spanned.length > 1 && (
-                    <span className="muted">
-                        spans {spanned.length} unclaimed areas — {spanned.length} deeds, {spanned.length} transactions
+                {claimRect && !buyable && (
+                    <span className="err">
+                        part of this selection is owned and not for sale — trim it to the green (free) and gold (listed) areas
                     </span>
                 )}
-                {listing && (
+                {claimRect && buyable && hasListed && (
                     <span className="muted">
-                        inside a listed plot — bought from the seller
-                        at {lovelaceToAda(listing.pricePerPixel)} ₳/px
-                        {area(claimRect!) < area(listing.rect) && " (the rest stays listed)"}
+                        {freePartCount > 0 && `${freePartCount} free part${freePartCount === 1 ? "" : "s"} claimed + `}
+                        {listedPartCount} listed part{listedPartCount === 1 ? "" : "s"} bought from the marketplace
                     </span>
                 )}
-                {!isConnected && claimRect && buyable && <span className="muted">connect a wallet to claim</span>}
+                {claimRect && buyable && pieceCount > 1 && (
+                    <span className="muted">
+                        {pieceCount} pieces — {canMerge
+                            ? "your wallet can merge them into a single NFT"
+                            : "kept as separate deeds (a wallet with batch signing merges them into one)"}
+                    </span>
+                )}
+                {!isConnected && claimRect && buyable && <span className="muted">connect a wallet to acquire</span>}
                 <button
                     className="primary"
                     disabled={!claimRect || !buyable || !isConnected || busy != null}
                     onClick={() => void claim()}
                 >
-                    {busy ?? (listing ? "buy this area" : ownerFree ? "claim this area (free)" : "claim this area")}
+                    {busy ?? (hasListed ? "acquire this area" : ownerFree ? "claim this area (free)" : "claim this area")}
                 </button>
             </div>
             {result && (
                 <p className="ok">
-                    {listing ? "bought!" : "claimed!"} tx <code>{result}</code>
+                    {hasListed ? "acquired!" : "claimed!"} tx <code>{result}</code>
                     {sprite && " — your image is being painted in the same batch; it appears once the chain confirms"}
                 </p>
             )}

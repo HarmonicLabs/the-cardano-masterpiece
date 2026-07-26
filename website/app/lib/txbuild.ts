@@ -13,9 +13,9 @@ import {
     config, ROWS_PER_LEAF, MIN_LISTING_LOVELACE, MIN_LOVELACE_PER_PIXEL,
     txBuilder, refScripts, walletFunding, walletDeed, marketUtxo, lovelacesOf,
     freeNodes, priceConfig, isProtocolOwner, tokens, bytesToHex, PRICE_NFT_NAME,
-    rectName, rectNameStr, rectArea, rectValid, rectContains, carveComplements,
+    rectName, rectNameStr, rectArea, rectValid, rectContains, carveComplements, rectUnionIfMergeable,
     freeDatum, listingDatum, requestDatum, txOutRefTag, lovelacePerPixelDatum,
-    oClaim, oOwnerClaim, oMintFree, oMintCarve, oPriceChange,
+    oClaim, oOwnerClaim, oMintFree, oMintCarve, oMintMerge, oPriceChange,
     mBuy, mPartialBuy, mListingCancel, mFill, mRequestCancel,
     asConstr, type FreeNode,
 } from "./chain.js";
@@ -373,6 +373,166 @@ export async function buildMarketPartialBuyTx(api: WalletApi, address: string, l
         metadata: deedCip25(config.ownershipPolicy, [bought, ...comps]),
         changeAddress: userAddr,
     }));
+}
+
+// ---- chainable acquire building blocks (used by buildAcquireTxs) -----------
+type Piece = { rect: Rect; utxo: UTxO };
+
+/** full buy of a whole listing, deed → outAddr, chained (funding threaded) */
+async function buildOneBuy(outAddr: Address, l: MarketListing, listingU: UTxO, f: UTxO[]): Promise<Tx> {
+    const { refK } = await refScripts();
+    return (await txBuilder()).build({
+        inputs: [{ utxo: listingU, referenceScript: { refUtxo: refK, datum: "inline", redeemer: mBuy(l.rect) } }, ...f],
+        outputs: [
+            { address: Address.fromString(l.seller), value: Value.lovelaces(BigInt(l.priceTotal)), datum: txOutRefTag(listingU.utxoRef) },
+            { address: outAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(l.rect), 1n]])) },
+        ],
+        changeAddress: outAddr,
+    });
+}
+
+/** partial buy of `bought` ⊂ listing: carve out the sub-rect, relist the
+ *  guillotine complements on the same terms, deed → outAddr, chained */
+async function buildOnePartialBuy(outAddr: Address, l: MarketListing, bought: Rect, listingU: UTxO, f: UTxO[]): Promise<Tx> {
+    const parent = l.rect;
+    const comps = carveComplements(parent, bought);
+    const { refO, refK } = await refScripts();
+    const mintEntries: [Uint8Array, bigint][] = [
+        [rectName(parent), -1n], [rectName(bought), 1n],
+        ...comps.map((c): [Uint8Array, bigint] => [rectName(c), 1n]),
+    ];
+    return (await txBuilder()).build({
+        inputs: [{ utxo: listingU, referenceScript: { refUtxo: refK, datum: "inline", redeemer: mPartialBuy(parent, bought) } }, ...f],
+        mints: [{ value: tokens(config.ownershipPolicy, mintEntries), script: { ref: refO, redeemer: oMintCarve(parent, bought) } }],
+        outputs: [
+            ...comps.map((c) => ({
+                address: Address.fromString(config.marketplaceAddress),
+                value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(c), 1n]])),
+                datum: asConstr(listingU.resolved.datum),   // same seller + price
+            })),
+            { address: Address.fromString(l.seller), value: Value.lovelaces(BigInt(l.pricePerPixel) * rectArea(bought)), datum: txOutRefTag(listingU.utxoRef) },
+            { address: outAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(bought), 1n]])) },
+        ],
+        metadata: deedCip25(config.ownershipPolicy, [bought, ...comps]),
+        changeAddress: outAddr,
+    });
+}
+
+/** merge two edge-adjacent deeds into their union deed, chained */
+async function buildOneMerge(outAddr: Address, a: Piece, b: Piece, union: Rect, f: UTxO[]): Promise<Tx> {
+    const { refO } = await refScripts();
+    return (await txBuilder()).build({
+        inputs: [a.utxo, b.utxo, ...f],
+        mints: [{
+            value: tokens(config.ownershipPolicy, [[rectName(a.rect), -1n], [rectName(b.rect), -1n], [rectName(union), 1n]]),
+            script: { ref: refO, redeemer: oMintMerge(a.rect, b.rect) },
+        }],
+        outputs: [{ address: outAddr, value: Value.add(Value.lovelaces(2_000_000n), tokens(config.ownershipPolicy, [[rectName(union), 1n]])) }],
+        metadata: deedCip25(config.ownershipPolicy, [union]),
+        changeAddress: outAddr,
+    });
+}
+
+/**
+ * Acquire a WHOLE selection that may span FREE + LISTED areas: claim the free
+ * sub-rects and partial-buy the listed sub-rects in one chained batch, leaving
+ * the wallet owning the entire rectangle. If `canMerge` (the wallet can sign the
+ * whole chain in one prompt), the pieces are then greedily merged into as few
+ * deeds as the geometry allows — ideally one. If a `sprite` is placed it is
+ * painted (referencing all the pieces) and committed in the same batch.
+ *
+ * Throws if any part of the selection is claimed-but-NOT-listed (unavailable).
+ */
+export async function buildAcquireTxs(
+    api: WalletApi, address: string, rect: Rect,
+    listings: MarketListing[], sprite: PlacedSprite | undefined, canMerge: boolean,
+): Promise<string[]> {
+    if (!rectValid(rect)) throw new Error("invalid rect");
+    const userAddr = Address.fromString(address);
+    const ownerAddr = Address.fromString(config.protocolOwnerAddress);
+    const isOwner = userAddr.paymentCreds.hash.toString() === ownerAddr.paymentCreds.hash.toString();
+    const outAddr = isOwner ? ownerAddr : userAddr;
+
+    // tile the selection into free + listed rectangles (they never overlap, so
+    // exact area coverage ⇒ a clean tiling; any shortfall = unavailable pixels)
+    const nodes = await freeNodes();
+    const freeParts = nodes
+        .map((node) => ({ node, part: rectIntersect(node.rect, rect) }))
+        .filter((p): p is { node: FreeNode; part: Rect } => p.part !== null);
+    const listedParts = listings
+        .map((l) => ({ l, part: rectIntersect(l.rect, rect) }))
+        .filter((p): p is { l: MarketListing; part: Rect } => p.part !== null);
+    const covered = [...freeParts, ...listedParts].reduce((s, p) => s + rectArea(p.part), 0n);
+    if (covered !== rectArea(rect))
+        throw new Error("part of your selection is owned and not for sale — trim it to the green (free) and gold (listed) areas");
+
+    const { refO } = await refScripts();
+    const { utxo: priceRef, pricePerPixel } = await priceConfig();
+    const editGroups = sprite ? spriteLeafGroups(sprite) : [];
+
+    // funding: claim payments + buy payments + relisted-comp/deed min-adas + fees
+    let target = 0n;
+    for (const { node, part } of freeParts)
+        target += (isOwner ? 0n : rectArea(part) * pricePerPixel)
+            + BigInt(carveComplements(node.rect, part).length) * 3_000_000n + 2_000_000n;
+    for (const { l, part } of listedParts)
+        target += BigInt(l.pricePerPixel) * rectArea(part)
+            + BigInt(carveComplements(l.rect, part).length + 1) * MIN_LISTING_LOVELACE;
+    target += BigInt(editGroups.length + freeParts.length + listedParts.length + 2) * 2_000_000n; // fee headroom
+
+    let f = await walletFunding(api, [], target);
+    const txs: Tx[] = [];
+    let pieces: Piece[] = [];
+
+    for (const { node, part } of freeParts) {
+        const price = isOwner ? 0n : rectArea(part) * pricePerPixel;
+        const tx = await buildOneClaim(outAddr, isOwner, node, part, f, refO, price, priceRef);
+        txs.push(tx); pieces.push({ rect: part, utxo: deedUtxoOf(tx, part, outAddr) });
+        f = [chainChange(tx, outAddr)];
+    }
+    for (const { l, part } of listedParts) {
+        const listingU = await marketUtxo(l.utxoRef);
+        const tx = rectArea(part) === rectArea(l.rect)
+            ? await buildOneBuy(outAddr, l, listingU, f)
+            : await buildOnePartialBuy(outAddr, l, part, listingU, f);
+        txs.push(tx); pieces.push({ rect: part, utxo: deedUtxoOf(tx, part, outAddr) });
+        f = [chainChange(tx, outAddr)];
+    }
+
+    // greedily merge into fewer deeds — only when the wallet can bulk-sign (each
+    // merge spends mempool deed outputs, unsignable one-at-a-time)
+    if (canMerge) {
+        let progress = true;
+        while (progress && pieces.length > 1) {
+            progress = false;
+            for (let i = 0; i < pieces.length && !progress; i++)
+                for (let j = i + 1; j < pieces.length; j++) {
+                    const union = rectUnionIfMergeable(pieces[i].rect, pieces[j].rect);
+                    if (!union) continue;
+                    const tx = await buildOneMerge(outAddr, pieces[i], pieces[j], union, f);
+                    txs.push(tx); f = [chainChange(tx, outAddr)];
+                    const merged = { rect: union, utxo: deedUtxoOf(tx, union, outAddr) };
+                    pieces = pieces.filter((_, k) => k !== i && k !== j).concat(merged);
+                    progress = true; break;
+                }
+        }
+    }
+
+    // paint the selection across whatever deeds we ended up with, then commit
+    if (editGroups.length > 0) {
+        const plots: Plot[] = pieces.map((p) => ({ rect: p.rect, name: rectNameStr(p.rect), utxo: p.utxo }));
+        const edited: EditedLeaf[] = [];
+        for (const g of editGroups) {
+            const res = await buildOneEdit(outAddr, plots, g.leafIdx, g.pixels, f);
+            if (!res) continue;
+            txs.push(res.tx); edited.push({ leafIdx: g.leafIdx, newCid: res.newCid, leafUtxo: leafOutputOf(res.tx) });
+            f = [chainChange(res.tx, outAddr)];
+        }
+        const { txs: commitTxs } = await buildCommitTxs(edited, f, outAddr);
+        txs.push(...commitTxs);
+    }
+
+    return txs.map(toHex);
 }
 
 export async function buildMarketCancelTx(api: WalletApi, address: string, utxoRef: string): Promise<string> {

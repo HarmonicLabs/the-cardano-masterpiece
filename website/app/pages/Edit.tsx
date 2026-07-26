@@ -10,7 +10,8 @@ import { loadImage, pixelify, saveSprite, loadSavedSprite, clearSavedSprite, typ
 import { EditPrebuilder, groupsKey, type EditGroup } from "../lib/editPrebuild.ts";
 import { buildCarveTx, buildCatchupCommitTxs } from "../lib/txbuild.ts";
 import { staleLeaves } from "../lib/masterpieceRoot.ts";
-import { signAndSubmit, signAndSubmitAll } from "../lib/sign.ts";
+import { signAndSubmit, signAndSubmitAll, type SignProgress } from "../lib/sign.ts";
+import { TxProgress } from "../components/TxProgress.tsx";
 
 const LINE = 1008;
 const ROWS_PER_LEAF = 12;   // 84 leaves x 12 rows (matches deployed geometry)
@@ -36,6 +37,7 @@ export function Edit() {
     const [error, setError] = useState<string | null>(null);
     const [stale, setStale] = useState(0);   // leaves ahead of the committed root
     const [resumed, setResumed] = useState(false);   // restored a pending edit
+    const [signProg, setSignProg] = useState<SignProgress | null>(null);
     const fileRef = useRef<HTMLInputElement>(null);
 
     // Resume a pending (offchain-only) edit after a refresh or a partial batch:
@@ -65,7 +67,7 @@ export function Edit() {
         try {
             setBusy("building commit transactions…");
             const txs = await buildCatchupCommitTxs(api, address);
-            const hashes = await signAndSubmitAll(api, txs, setBusy);
+            const hashes = await signAndSubmitAll(api, txs, setSignProg);
             setResults(hashes);
             setBusy("waiting for confirmation…");
             await new Promise((r) => setTimeout(r, 30_000));
@@ -74,7 +76,7 @@ export function Edit() {
         } catch (e) {
             setError(String((e as Error).message ?? e));
         } finally {
-            setBusy(null);
+            setBusy(null); setSignProg(null);
         }
     }
 
@@ -187,7 +189,7 @@ export function Edit() {
             setBusy(prebuilt ? "finalizing transactions…" : "building transaction(s)…");
             const txs = await prebuilderRef.current.request(api, address, groups);
             // one chained batch: single CIP-103 prompt when supported
-            const hashes = await signAndSubmitAll(api, txs, setBusy);
+            const hashes = await signAndSubmitAll(api, txs, setSignProg);
             setResults(hashes);
             dropImage();
             setBusy("refreshing canvas…");
@@ -197,7 +199,7 @@ export function Edit() {
         } catch (e) {
             setError(String((e as Error).message ?? e));
         } finally {
-            setBusy(null);
+            setBusy(null); setSignProg(null);
         }
     }
 
@@ -217,7 +219,7 @@ export function Edit() {
         } catch (e) {
             setError(String((e as Error).message ?? e));
         } finally {
-            setBusy(null);
+            setBusy(null); setSignProg(null);
         }
     }
 
@@ -242,6 +244,7 @@ export function Edit() {
 
     return (
         <section>
+            <TxProgress p={signProg} />
             <div className="pagehead">
                 <h2>Studio</h2>
                 <p className="tagline">

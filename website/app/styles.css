@@ -281,3 +281,32 @@ footer {
     font-size: .62rem; text-transform: uppercase; letter-spacing: .28em;
     color: var(--ink-faint);
 }
+
+/* ---- batch-signing progress modal --------------------------------------- */
+.modal-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .55); backdrop-filter: blur(3px);
+    padding: 1rem;
+}
+.modal-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 1.4rem 1.6rem;
+    max-width: min(92vw, 440px); width: 100%;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .35); text-align: center;
+}
+.modal-card h3 { margin: 0 0 .6rem; font-size: 1.05rem; color: var(--ink); }
+.modal-card .muted { display: block; }
+.modal-card .muted.small { font-size: .74rem; margin-top: .5rem; line-height: 1.4; }
+.txdots { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; margin: 1rem 0 .8rem; }
+.txdot {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: .72rem; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--line); color: var(--ink-faint); background: transparent;
+}
+.txdot.active { border-color: var(--gold); color: var(--ink); background: var(--gold-soft); animation: txpulse 1.1s ease-in-out infinite; }
+.txdot.done { border-color: var(--good); color: var(--good); }
+@keyframes txpulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.txbar { height: 5px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.txbar-fill { height: 100%; background: var(--gold); border-radius: 999px; transition: width .3s ease; }

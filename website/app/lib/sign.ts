@@ -26,39 +26,89 @@ function bulkSigner(api: WalletApi): SignTxsFn | undefined {
     return undefined;
 }
 
+/** true if the wallet can sign a whole chain in one prompt (CIP-103 signTxs) —
+ *  used to decide whether to append the extra (chained) merge txs */
+export const hasBulkSigner = (api: WalletApi): boolean => bulkSigner(api) !== undefined;
+
+// ---- progress reporting (drives the signing modal) -------------------------
+export type SignPhase = "signing" | "submitting" | "confirming" | "done";
+export interface SignProgress {
+    total: number;      // number of transactions in the batch
+    current: number;    // 1-based index being processed (0 = bulk sign, whole batch)
+    phase: SignPhase;
+    bulk: boolean;      // true = one wallet prompt (CIP-103), false = one prompt per tx
+    hashes: string[];   // submitted so far, in order
+}
+
+/** poll the same-origin /bf proxy until the tx lands in a block (or time out) */
+async function waitConfirmed(hash: string, timeoutMs = 180_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 4000));
+        try { if ((await fetch(`/bf/txs/${hash}`)).ok) return; } catch { /* transient — retry */ }
+    }
+    throw new Error(`timed out waiting for transaction ${hash.slice(0, 12)}… to confirm`);
+}
+
 /**
- * Sign and submit a BATCH of txs (parallel or chained — chained batches rely
- * on the in-order submission below). One wallet prompt via CIP-103 `signTxs`
- * when the wallet supports it, otherwise one `signTx` prompt per tx.
- * Reports progress through `onProgress`; returns the tx hashes in order.
+ * Sign + submit a BATCH of txs (chained — each tx spends the previous one's
+ * outputs), reporting progress through `onProgress`.
+ *
+ *  • Wallet with CIP-103 `signTxs`  → ONE prompt for the whole chain, then
+ *    submit in order (fast).
+ *  • Wallet without it              → fall back to ONE prompt per tx, and wait
+ *    for each to CONFIRM on-chain before signing the next (a per-tx `signTx`
+ *    can't resolve the previous tx's not-yet-on-chain inputs). Slower, but works
+ *    with any CIP-30 wallet; the modal shows the per-tx progress.
  */
 export async function signAndSubmitAll(
     api: WalletApi,
     txs: string[],
-    onProgress?: (msg: string) => void,
+    onProgress?: (p: SignProgress) => void,
 ): Promise<string[]> {
-    if (txs.length === 1) {
-        onProgress?.("waiting for wallet signature…");
-        return [await signAndSubmit(api, txs[0])];
-    }
-    // These batches are CHAINED — each tx spends the previous one's (not-yet-
-    // on-chain) outputs. A per-tx `signTx` can't resolve those inputs, so bulk
-    // signing (CIP-103 signTxs) is REQUIRED: the wallet signs the whole chain in
-    // one pass with the batch's outputs in scope.
-    const bulk = bulkSigner(api);
-    if (!bulk) throw new Error(
-        `This action needs ${txs.length} chained transactions signed together, but this wallet does ` +
-        `not expose CIP-103 bulk signing (signTxs). Use a wallet that supports it (e.g. Eternl).`);
-
-    onProgress?.(`waiting for wallet signature… (${txs.length} transactions, single prompt)`);
-    const witnesses = await bulk(txs.map((cbor) => ({ cbor, partialSign: true })));
-    if (!Array.isArray(witnesses) || witnesses.length !== txs.length)
-        throw new Error("wallet returned an unexpected signTxs result");
+    const total = txs.length;
     const hashes: string[] = [];
-    for (let i = 0; i < txs.length; i++) {
-        onProgress?.(`submitting transaction ${i + 1}/${txs.length}…`);
-        const { hash } = await submitTx(txs[i], witnesses[i]);
+    const report = (current: number, phase: SignPhase, bulk: boolean) =>
+        onProgress?.({ total, current, phase, bulk, hashes: [...hashes] });
+
+    // single tx: a plain signTx (no chaining concerns)
+    if (total === 1) {
+        report(1, "signing", false);
+        const w = await api.signTx(txs[0], true);
+        report(1, "submitting", false);
+        const { hash } = await submitTx(txs[0], w);
         hashes.push(hash);
+        report(1, "done", false);
+        return hashes;
     }
+
+    const bulk = bulkSigner(api);
+    if (bulk) {
+        report(0, "signing", true);   // whole chain, one prompt
+        const witnesses = await bulk(txs.map((cbor) => ({ cbor, partialSign: true })));
+        if (!Array.isArray(witnesses) || witnesses.length !== total)
+            throw new Error("wallet returned an unexpected signTxs result");
+        for (let i = 0; i < total; i++) {
+            report(i + 1, "submitting", true);
+            const { hash } = await submitTx(txs[i], witnesses[i]);
+            hashes.push(hash);
+        }
+        report(total, "done", true);
+        return hashes;
+    }
+
+    // fallback: one prompt per tx, confirming between chained txs
+    for (let i = 0; i < total; i++) {
+        report(i + 1, "signing", false);
+        const witnesses = await api.signTx(txs[i], true);
+        report(i + 1, "submitting", false);
+        const { hash } = await submitTx(txs[i], witnesses);
+        hashes.push(hash);
+        if (i < total - 1) {
+            report(i + 1, "confirming", false);   // let the next tx's inputs land on-chain
+            await waitConfirmed(hash);
+        }
+    }
+    report(total, "done", false);
     return hashes;
 }

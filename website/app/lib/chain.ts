@@ -184,6 +184,8 @@ export const MIN_LOVELACE_PER_PIXEL = 1_000_000n;
 export const lovelacePerPixelDatum = (value: bigint): DataConstr => new DataConstr(1, [new DataI(value)]);
 export const oPriceChange = (): DataConstr => new DataConstr(0, []);
 export const oMintFree = (): DataConstr => new DataConstr(1, []);
+export const oMintMerge = (a: Rect, b: Rect): DataConstr =>
+    new DataConstr(2, [rectData(a), rectData(b)]);
 export const oMintCarve = (parent: Rect, target: Rect): DataConstr =>
     new DataConstr(3, [rectData(parent), rectData(target)]); // carve reindexed 4->3 (split removed)
 export const mpEdit = (rects: Rect[]): DataConstr =>
@@ -204,6 +206,16 @@ export const txOutRefTag = (ref: TxOutRef): DataConstr => new DataConstr(0, [
     new DataB(hexToBytes(ref.id.toString())),
     new DataI(Number(ref.index)),
 ]);
+
+/** the union rect of two deeds IF they are edge-adjacent and together tile a
+ *  rectangle (the ONLY shape the `merge` contract accepts), else null */
+export const rectUnionIfMergeable = (a: Rect, b: Rect): Rect | null => {
+    if (a.y0 === b.y0 && a.y1 === b.y1 && (a.x1 === b.x0 || b.x1 === a.x0)) // side by side
+        return { x0: Math.min(a.x0, b.x0), y0: a.y0, x1: Math.max(a.x1, b.x1), y1: a.y1 };
+    if (a.x0 === b.x0 && a.x1 === b.x1 && (a.y1 === b.y0 || b.y1 === a.y0)) // stacked
+        return { x0: a.x0, y0: Math.min(a.y0, b.y0), x1: a.x1, y1: Math.max(a.y1, b.y1) };
+    return null;
+};
 
 export const carveComplements = (parent: Rect, target: Rect): Rect[] => {
     const out: Rect[] = [];
