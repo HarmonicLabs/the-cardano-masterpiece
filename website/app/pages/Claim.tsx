@@ -360,6 +360,7 @@ export function Claim() {
                     sprite={sprite}
                     spriteValid={buyable}
                     onSpriteMove={(x, y) => setSprite((s) => (s ? { ...s, ...snapSprite(x, y, s.w, s.h) } : s))}
+                    onSpriteResize={(w) => setSpriteW(w)}
                 />
             </div>
 

@@ -348,6 +348,7 @@ export function Edit() {
                     spriteValid={clipped === 0}
                     onSpriteMove={mode === "paint" && sprite
                         ? (x, y) => setSprite((s) => (s ? { ...s, x, y } : s)) : undefined}
+                    onSpriteResize={mode === "paint" && sprite ? (w) => setSpriteW(w) : undefined}
                 />
             </div>
 

@@ -15,6 +15,8 @@ interface Props {
     sprite?: PlacedSprite | null;
     spriteValid?: boolean;
     onSpriteMove?: (x: number, y: number) => void;
+    /** two-finger pinch resizes the sprite (target width in canvas px) */
+    onSpriteResize?: (w: number) => void;
 }
 
 const W = 1008;   // canvas width
@@ -40,12 +42,16 @@ const clampView = (v: View): View => {
  */
 export function CanvasBoard({
     pixels, overlays = [], selection, onSelect,
-    sprite, spriteValid = true, onSpriteMove,
+    sprite, spriteValid = true, onSpriteMove, onSpriteResize,
 }: Props) {
     const cvRef = useRef<HTMLCanvasElement>(null);
     const dragRef = useRef<{ x: number; y: number } | null>(null);
     const grabRef = useRef<{ dx: number; dy: number } | null>(null);
     const panRef = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
+    // active touch/pointer points, keyed by pointerId — used for pinch
+    const ptsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+    const pinchRef = useRef<{ baseDist: number; baseW: number } | null>(null); // sprite resize
+    const zoomPinchRef = useRef<{ prevDist: number } | null>(null);            // view zoom
 
     const [view, setView] = useState<View>({ scale: 1, ox: 0, oy: 0 });
     const [handTool, setHandTool] = useState(false);
@@ -200,6 +206,17 @@ export function CanvasBoard({
                 }}
                 onPointerDown={(e) => {
                     e.currentTarget.setPointerCapture(e.pointerId);
+                    ptsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                    if (ptsRef.current.size === 2) {
+                        // a second finger: start a pinch, cancel any 1-finger op
+                        dragRef.current = grabRef.current = panRef.current = null;
+                        const [a, b] = [...ptsRef.current.values()];
+                        const d = Math.hypot(a.x - b.x, a.y - b.y);
+                        if (sprite && onSpriteResize) pinchRef.current = { baseDist: d, baseW: sprite.w };
+                        else zoomPinchRef.current = { prevDist: d };
+                        return;
+                    }
+                    if (ptsRef.current.size > 2) return;
                     const pan = panning || e.button === 1;
                     if (pan) {
                         panRef.current = { px: e.clientX, py: e.clientY, ox: view.ox, oy: view.oy };
@@ -220,6 +237,20 @@ export function CanvasBoard({
                     }
                 }}
                 onPointerMove={(e) => {
+                    if (ptsRef.current.has(e.pointerId)) ptsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                    // two-finger pinch: resize the sprite (or zoom the view)
+                    if (ptsRef.current.size >= 2) {
+                        const [a, b] = [...ptsRef.current.values()];
+                        const d = Math.hypot(a.x - b.x, a.y - b.y);
+                        if (pinchRef.current && sprite && onSpriteResize) {
+                            const w = Math.round(pinchRef.current.baseW * d / pinchRef.current.baseDist);
+                            onSpriteResize(Math.max(2, Math.min(1008, w)));
+                        } else if (zoomPinchRef.current && zoomPinchRef.current.prevDist > 0) {
+                            zoomAt(d / zoomPinchRef.current.prevDist, toCanvas({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 }));
+                            zoomPinchRef.current.prevDist = d;
+                        }
+                        return;
+                    }
                     if (panRef.current) {
                         const cv = cvRef.current!;
                         const r = cv.getBoundingClientRect();
@@ -236,7 +267,16 @@ export function CanvasBoard({
                     if (sprite && onSpriteMove) moveSpriteTo(p);
                     else if (onSelect) emitSelect(dragRef.current, p);
                 }}
-                onPointerUp={() => { dragRef.current = null; grabRef.current = null; panRef.current = null; }}
+                onPointerUp={(e) => {
+                    ptsRef.current.delete(e.pointerId);
+                    if (ptsRef.current.size < 2) { pinchRef.current = null; zoomPinchRef.current = null; }
+                    dragRef.current = null; grabRef.current = null; panRef.current = null;
+                }}
+                onPointerCancel={(e) => {
+                    ptsRef.current.delete(e.pointerId);
+                    if (ptsRef.current.size < 2) { pinchRef.current = null; zoomPinchRef.current = null; }
+                    dragRef.current = null; grabRef.current = null; panRef.current = null;
+                }}
             />
         </div>
     );

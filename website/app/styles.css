@@ -169,7 +169,13 @@ canvas.painter { display: block; image-rendering: pixelated; max-width: 100%; ma
     backdrop-filter: blur(8px);
 }
 @media (max-width: 900px) {
-    .zoombar { right: auto; left: 10px; top: 10px; margin-right: 0; }
+    /* touch: the zoom pill sits ABOVE the artwork (never over it) as a
+       horizontal bar; pinch on the canvas to zoom / resize a placed image */
+    .zoombar {
+        position: static; flex-direction: row; width: fit-content;
+        margin: 0 auto 8px; right: auto; top: auto;
+    }
+    .zoombar .zoomlvl { writing-mode: horizontal-tb; padding: 0 4px; }
 }
 .zoombar button {
     width: 28px; height: 28px; padding: 0; line-height: 1; justify-content: center;
