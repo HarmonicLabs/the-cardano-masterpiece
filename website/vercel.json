@@ -4,20 +4,52 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/canvas.bin", "destination": "/api/canvas" },
-    { "source": "/og.png", "destination": "/api/og" },
-    { "source": "/bf/:path*", "destination": "/api/bf/:path*" }
+    {
+      "source": "/canvas.bin",
+      "destination": "/api/canvas"
+    },
+    {
+      "source": "/og.png",
+      "destination": "/api/og"
+    },
+    {
+      "source": "/bf/:path*",
+      "destination": "/api/bf?__bf=:path*"
+    }
   ],
   "functions": {
-    "api/canvas.ts": { "maxDuration": 60, "memory": 1024 },
-    "api/og.ts": { "maxDuration": 60, "memory": 1024 },
-    "api/state.ts": { "maxDuration": 60 },
-    "api/free.ts": { "maxDuration": 60 },
-    "api/market.ts": { "maxDuration": 60 },
-    "api/deeds.ts": { "maxDuration": 60 },
-    "api/plots.ts": { "maxDuration": 30 },
-    "api/tx/submit.ts": { "maxDuration": 30 },
-    "api/bf/[...path].ts": { "maxDuration": 30 },
-    "api/publish.ts": { "maxDuration": 60, "memory": 1024 }
+    "api/canvas.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/og.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/state.ts": {
+      "maxDuration": 60
+    },
+    "api/free.ts": {
+      "maxDuration": 60
+    },
+    "api/market.ts": {
+      "maxDuration": 60
+    },
+    "api/deeds.ts": {
+      "maxDuration": 60
+    },
+    "api/plots.ts": {
+      "maxDuration": 30
+    },
+    "api/tx/submit.ts": {
+      "maxDuration": 30
+    },
+    "api/publish.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/bf.ts": {
+      "maxDuration": 30
+    }
   }
 }
