@@ -69,7 +69,7 @@ export const BF_PROJECT_ID = process.env.BLOCKFROST_PROJECT_ID;
 export const BLOCKFROST_URL = process.env.BLOCKFROST_URL
     ?? (BF_PROJECT_ID ? `https://cardano-${BF_NETWORK}.blockfrost.io/api/v0` : "https://blockfrost-preprod.onchainapps.io");
 /** auth header for the raw fetch + the /bf proxy (empty for a keyless proxy) */
-export const bfHeaders = (): Record<string, string> => BF_PROJECT_ID ? { project: BF_PROJECT_ID } : {};
+export const bfHeaders = (): Record<string, string> => BF_PROJECT_ID ? { project_id: BF_PROJECT_ID } : {};
 
 export const api = new BlockfrostPluts(
     BF_PROJECT_ID
