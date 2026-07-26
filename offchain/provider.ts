@@ -111,7 +111,12 @@ function makePreprodProvider(): ChainProvider {
 // ---- mainnet (blockfrost) -------------------------------------------------
 
 function makeMainnetProvider(): ChainProvider {
-    const api = new BlockfrostPluts({ customBackend: BLOCKFROST_MAINNET_URL, network: "mainnet" });
+    // Prefer a real blockfrost.io mainnet key (BLOCKFROST_PROJECT_ID) — it's
+    // at-tip and reliable; only fall back to a public proxy if no key is set.
+    const projectId = process.env.BLOCKFROST_PROJECT_ID;
+    const api = projectId
+        ? new BlockfrostPluts({ projectId, network: "mainnet" })
+        : new BlockfrostPluts({ customBackend: BLOCKFROST_MAINNET_URL, network: "mainnet" });
     let _txb: TxBuilder | undefined;
     return {
         backend: "mainnet",

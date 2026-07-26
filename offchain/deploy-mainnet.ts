@@ -84,24 +84,28 @@ const step = (s: string): void => console.log(`\n== ${s} ==`);
 
 // ---------------------------------------------------------------------------
 step("0. split funds into labelled utxos");
+// consume ALL pure-ada utxos (consolidate + split in one tx) so this works
+// whether the deployer holds one big utxo or several small ones (e.g. after a
+// prior failed run left the split utxos behind).
 const pure = (await provider.queryUtxos(wallet.address))
     .filter((u) => {
         const j = u.resolved.value.toJson() as Record<string, unknown>;
-        return Object.keys(j).length === 1 && u.resolved.value.lovelaces >= ADA(1000)
-            && u.resolved.refScript === undefined;
-    })
-    .sort((a, b) => Number(a.resolved.value.lovelaces - b.resolved.value.lovelaces));
-assert(pure.length > 0, "no pure-ada utxo >= 1000 ADA in the deployer wallet");
-// [0]=collateral 10, [1]=stewardship genesis 5, [2]=masterpiece genesis 5,
-// [3]=ref-deploy funds 150, [4]=working funds 800
+        return Object.keys(j).length === 1 && u.resolved.refScript === undefined;
+    });
+const pureTotal = pure.reduce((s, u) => s + u.resolved.value.lovelaces, 0n);
+assert(pureTotal >= ADA(197), `need >= 197 ADA in pure utxos, have ${pureTotal / 1_000_000n}`);
+// INIT-ONLY lean split for a ~200 ADA budget (leaves hatched separately later).
+// Cost: 35+60+25 ref scripts + 6+47 init outputs + fees ≈ 178 ADA.
+// [0]=collateral 5, [1]=stewardship genesis 3, [2]=masterpiece genesis 3,
+// [3]=ref-deploy funds 100 (35+60 locked here), [4]=working funds 86 (inits + mkt ref)
 const splitTx = await sendTx({
-    inputs: [pure[0]],
+    inputs: pure,
     outputs: [
-        { address: wallet.address, value: Value.lovelaces(ADA(10)) },
         { address: wallet.address, value: Value.lovelaces(ADA(5)) },
-        { address: wallet.address, value: Value.lovelaces(ADA(5)) },
-        { address: wallet.address, value: Value.lovelaces(ADA(150)) },
-        { address: wallet.address, value: Value.lovelaces(ADA(800)) },
+        { address: wallet.address, value: Value.lovelaces(ADA(3)) },
+        { address: wallet.address, value: Value.lovelaces(ADA(3)) },
+        { address: wallet.address, value: Value.lovelaces(ADA(100)) },
+        { address: wallet.address, value: Value.lovelaces(ADA(86)) },
     ],
     changeAddress: wallet.address,
 }, "fund-split");
@@ -172,7 +176,7 @@ const rootD0 = rootDatum(Array.from({ length: N_LEAFS }, () => initCid), bmpHead
     // working change from the stewardship-init tx (output index 2 = change)
     const workUtxo = oi.filter((u) => {
         const j = u.resolved.value.toJson() as Record<string, unknown>;
-        return Object.keys(j).length === 1 && u.resolved.value.lovelaces >= ADA(100)
+        return Object.keys(j).length === 1 && u.resolved.value.lovelaces >= ADA(60)
             && u.utxoRef.toString() !== collateralU.utxoRef.toString();
     }).sort((a, b) => Number(a.resolved.value.lovelaces - b.resolved.value.lovelaces))[0];
     assert(workUtxo, "working funds for masterpiece init");
@@ -202,7 +206,7 @@ step("4. deploy marketplace reference script (parked at Lock)");
 const kFund = (await provider.queryUtxos(wallet.address))
     .filter((u) => {
         const j = u.resolved.value.toJson() as Record<string, unknown>;
-        return Object.keys(j).length === 1 && u.resolved.value.lovelaces >= ADA(50)
+        return Object.keys(j).length === 1 && u.resolved.value.lovelaces >= ADA(30)
             && u.resolved.refScript === undefined
             && u.utxoRef.toString() !== collateralU.utxoRef.toString();
     })

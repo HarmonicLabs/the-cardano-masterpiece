@@ -139,7 +139,7 @@ function bundle(script: Script): ContractBundle {
         script,
         hash: script.hash,
         policyHex: script.hash.toString(),
-        address: Address.testnet(Credential.script(script.hash)),
+        address: Address.mainnet(Credential.script(script.hash)),   // mainnet-only
     };
 }
 
