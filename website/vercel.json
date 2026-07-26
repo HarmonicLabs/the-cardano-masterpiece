@@ -18,6 +18,6 @@
     "api/plots.ts": { "maxDuration": 30 },
     "api/tx/submit.ts": { "maxDuration": 30 },
     "api/bf/[...path].ts": { "maxDuration": 30 },
-    "api/publish.ts": { "maxDuration": 300, "memory": 1024 }
+    "api/publish.ts": { "maxDuration": 60, "memory": 1024 }
   }
 }
