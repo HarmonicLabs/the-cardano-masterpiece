@@ -37,19 +37,21 @@ const CANVAS: Rect = { x0: 0, y0: 0, x1: 1008, y1: 1008 };
 step("0. wallets + funding");
 const seller: Wallet = ensureWallet(`acq-seller-${Date.now()}`);
 const buyer: Wallet = ensureWallet(`acq-buyer-${Date.now()}`);
+// a 100x100 claim at 0.5 ADA/px is a 5,000 ADA self-payment to the steward, so
+// the wallets need ample funding (the payment must be covered by tx inputs).
 const fundTx = fundFromGenesis([
     { address: seller.address, lovelace: ADA(10) },
     { address: seller.address, lovelace: ADA(50) },
-    { address: seller.address, lovelace: ADA(2000) },
+    { address: seller.address, lovelace: ADA(8000) },
     { address: seller.address, lovelace: ADA(70) },
     { address: buyer.address, lovelace: ADA(10) },
-    { address: buyer.address, lovelace: ADA(2000) },
+    { address: buyer.address, lovelace: ADA(8000) },
 ], "fund-acq");
 awaitTxAtAddr(buyer.address, fundTx);
 const sU = queryUtxos(seller.address);
 const sColl = sU.find((u) => u.resolved.value.lovelaces === ADA(10))!;
 const genesisU = sU.find((u) => u.resolved.value.lovelaces === ADA(50))!;
-const sFunds = sU.find((u) => u.resolved.value.lovelaces === ADA(2000))!;
+const sFunds = sU.find((u) => u.resolved.value.lovelaces === ADA(8000))!;
 
 const own = stewardshipContract(seller.address, genesisU.utxoRef);   // protocolSteward = seller
 const market = marketplaceContract(own.hash.toBuffer());
