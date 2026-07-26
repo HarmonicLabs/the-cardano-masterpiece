@@ -4,9 +4,11 @@ import { fetchPixels, fetchState, type CanvasStateInfo } from "../lib/api.ts";
 
 // CIP-68 (222) user token for the root "masterpiece" NFT.
 const ROOT_USER_ASSET_NAME = "000de1406d61737465727069656365";
-// cardanoscan host per network: mainnet has no subdomain, testnets do (preprod/preview).
-const explorerBase = (net: string) =>
-    net === "mainnet" ? "https://cardanoscan.io" : `https://${net}.cardanoscan.io`;
+// pool.pm (mainnet) renders the CIP-68 image inline — it resolves the (222) user
+// token's (100) reference metadata and shows the actual masterpiece. Its canonical
+// deep-link form is `<policyId>.<assetNameHex>`.
+const poolPmAsset = (policy: string, nameHex: string) =>
+    `https://pool.pm/${policy}.${nameHex}`;
 // Resolve ipfs:// to an HTTP gateway (not all browsers speak ipfs:// natively).
 // Link TEXT stays `ipfs://<cid>`; only the href points at the gateway.
 const ipfsGateway = (uri: string) =>
@@ -48,9 +50,9 @@ export function Landing() {
                             </a>
                         </p>}
                     <p className="uri">
-                        <a href={`${explorerBase(state.network)}/token/${state.masterpiecePolicy}${ROOT_USER_ASSET_NAME}`}
+                        <a href={poolPmAsset(state.masterpiecePolicy, ROOT_USER_ASSET_NAME)}
                            target="_blank" rel="noreferrer">
-                            root NFT on Cardanoscan ↗
+                            view the NFT on pool.pm ↗
                         </a>
                     </p>
                 </>
