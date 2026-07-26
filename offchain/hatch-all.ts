@@ -22,7 +22,7 @@ import {
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getProvider, loadPreprodWallet } from "./provider.ts";
+import { getProvider, loadMainnetWallet } from "./provider.ts";
 import {
     lockContract, leafDatum, nurseryDatum, initialChunk, mpHatch,
     N_LEAFS, LEAF_NFT_NAME,
@@ -53,8 +53,8 @@ const policy: string = config.masterpiecePolicy;
 const mpAddr = Address.fromString(config.masterpieceAddress);
 const refRef = `${config.masterpieceRefScript.txHash}#${config.masterpieceRefScript.index}`;
 
-const provider = getProvider("preprod");
-const wallet = loadPreprodWallet();
+const provider = getProvider("mainnet");
+const wallet = loadMainnetWallet();
 console.log("deployer   :", wallet.address.toString());
 console.log("masterpiece:", config.masterpieceAddress);
 
@@ -112,6 +112,7 @@ if (have < need)
 
 // ---- drain the nursery one leaf per tx (mempool-chained) ------------------
 let fundingInputs: UTxO[] = pure;                 // first tx pulls in all pure-ada utxos
+let prevHash: string | undefined;                 // parent tx, for retry-on-propagation-lag
 for (let leaf = nextLeaf; leaf < N_LEAFS; leaf++) {
     const last = leaf === N_LEAFS - 1;
     const remaining = N_LEAFS - leaf;             // markers the nursery holds right now
@@ -141,20 +142,38 @@ for (let leaf = nextLeaf; leaf < N_LEAFS; leaf++) {
         changeAddress: wallet.address,
     });
     tx.signWith(wallet.prv);
-    await provider.submit(tx, `hatch-${leaf}`);
+    const hash = tx.hash.toString();
+    try {
+        await provider.submit(tx, `hatch-${leaf}`);
+    } catch (e) {
+        // CHAINED submit: blockfrost occasionally hasn't propagated the PARENT
+        // to the node's mempool when this child arrives ("all inputs are spent /
+        // transaction has probably already been included"). Confirm the parent
+        // on-chain, then retry this child once. Chaining stays fast; this only
+        // fires on the odd propagation hiccup.
+        const msg = String((e as Error)?.message ?? e);
+        if (!prevHash || !/already been included|inputs are spent|already exists|ValueNotConserved/i.test(msg)) throw e;
+        await provider.awaitTx(mpAddr, prevHash);
+        await provider.submit(tx, `hatch-${leaf}`);
+    }
+    prevHash = hash;
 
     const outs = tx.body.outputs;
     if (!last) nursery = new UTxO({
-        utxoRef: new TxOutRef({ id: tx.hash.toString(), index: 1 }), resolved: outs[1] });
+        utxoRef: new TxOutRef({ id: hash, index: 1 }), resolved: outs[1] });
     // chain the change (always the last output) to fund the next hatch
     fundingInputs = [new UTxO({
-        utxoRef: new TxOutRef({ id: tx.hash.toString(), index: outs.length - 1 }),
+        utxoRef: new TxOutRef({ id: hash, index: outs.length - 1 }),
         resolved: outs[outs.length - 1] })];
 
-    if ((leaf - nextLeaf) % 10 === 9 || last) {
-        await provider.awaitTx(mpAddr, tx.hash.toString());
-        console.log(`  hatched through leaf ${leaf} ✓`);
-    }
+    // blockfrost.io's shared/load-balanced submit does NOT sustain a deep
+    // mempool chain: after ~8-14 back-to-back submits a backend node with an
+    // inconsistent view rejects with "all inputs are spent" (and confirming the
+    // parent + retrying doesn't clear it). So CONFIRM each tx on-chain before
+    // chaining the next — reliable on mainnet; the retry above covers residual
+    // hiccups. (Devnet/a single node can chain freely; blockfrost cannot.)
+    await provider.awaitTx(mpAddr, hash);
+    if ((leaf - nextLeaf) % 10 === 9 || last) console.log(`  hatched through leaf ${leaf} ✓`);
 }
 
 // ---- verify the nursery is fully drained ----------------------------------

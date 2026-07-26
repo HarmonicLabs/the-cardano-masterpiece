@@ -225,6 +225,15 @@ canvas.painter { display: block; image-rendering: pixelated; max-width: 100%; ma
 }
 .actionbar code { font-family: var(--mono); font-size: .78rem; color: var(--ink); }
 .actionbar label { display: inline-flex; gap: .55rem; align-items: center; }
+/* multi-image chips (Studio paint mode) */
+.spritechips { display: inline-flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.spritechip { display: inline-flex; align-items: center; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+.spritechip button { border: 0; border-radius: 0; margin: 0; padding: .2rem .5rem; font-size: .78rem; }
+.spritechip .x { padding: .2rem .45rem; color: var(--ink-faint); border-left: 1px solid var(--line-soft); }
+.spritechip .x:hover:not(:disabled) { color: rgb(230, 70, 70); }
+.spritechip.active { border-color: rgb(50, 190, 100); }
+.spritechip.active button:first-child { background: rgba(50, 190, 100, .16); color: var(--ink); }
+
 .modeswitch { display: inline-flex; gap: 0; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
 .modeswitch button { border: 0; border-radius: 0; margin: 0; }
 .modeswitch button + button { border-left: 1px solid var(--line-soft); }

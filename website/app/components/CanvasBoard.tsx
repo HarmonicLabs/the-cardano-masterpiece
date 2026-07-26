@@ -11,12 +11,16 @@ interface Props {
     selection?: Rect | null;        // highlighted selection
     /** drag-selection callback (enables selection interaction) */
     onSelect?: (r: Rect) => void;
-    /** imported-image preview; when present, dragging MOVES the sprite */
+    /** the ACTIVE imported image; dragging MOVES it, pinch resizes it */
     sprite?: PlacedSprite | null;
     spriteValid?: boolean;
     onSpriteMove?: (x: number, y: number) => void;
     /** two-finger pinch resizes the sprite (target width in canvas px) */
     onSpriteResize?: (w: number) => void;
+    /** other placed images, rendered behind the active one (read-only) */
+    bgSprites?: PlacedSprite[];
+    /** click a bg image to make it active; click empty canvas to deselect (null) */
+    onSpriteSelect?: (id: number | null) => void;
 }
 
 const W = 1008;   // canvas width
@@ -43,6 +47,7 @@ const clampView = (v: View): View => {
 export function CanvasBoard({
     pixels, overlays = [], selection, onSelect,
     sprite, spriteValid = true, onSpriteMove, onSpriteResize,
+    bgSprites = [], onSpriteSelect,
 }: Props) {
     const cvRef = useRef<HTMLCanvasElement>(null);
     const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -56,7 +61,9 @@ export function CanvasBoard({
     const [view, setView] = useState<View>({ scale: 1, ox: 0, oy: 0 });
     const [handTool, setHandTool] = useState(false);
 
-    const hasTool = Boolean(onSelect || (sprite && onSpriteMove));
+    // paint mode is a "tool" even with no active image (so clicks select/deselect
+    // rather than pan); onSpriteSelect is only passed in paint mode.
+    const hasTool = Boolean(onSelect || (sprite && onSpriteMove) || onSpriteSelect);
     const panning = handTool || !hasTool;
 
     // chain pixels on an offscreen canvas so the visible one can transform
@@ -83,6 +90,15 @@ export function CanvasBoard({
         [sprite?.pixels, sprite?.opaque, sprite?.w, sprite?.h]
     );
 
+    // the other placed images, pre-rendered. Keyed on id+geometry so moving the
+    // ACTIVE sprite doesn't rebuild these every frame.
+    const bgKey = bgSprites.map((s) => `${s.id}:${s.x},${s.y}:${s.w}x${s.h}`).join("|");
+    const bgCvs = useMemo(
+        () => bgSprites.map((s) => ({ x: s.x, y: s.y, w: s.w, h: s.h, cv: spriteToCanvas(s) })),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [bgKey],
+    );
+
     // draw with the current view transform
     useEffect(() => {
         const cv = cvRef.current;
@@ -100,6 +116,15 @@ export function CanvasBoard({
             ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
         }
         const lw = 2 / scale; // constant on-screen line width
+        // other placed images, behind the active one
+        for (const b of bgCvs) {
+            ctx.globalAlpha = 0.6;
+            ctx.drawImage(b.cv, b.x, b.y);
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = "rgba(170, 170, 180, .8)";
+            ctx.lineWidth = lw;
+            ctx.strokeRect(b.x + lw / 2, b.y + lw / 2, b.w - lw, b.h - lw);
+        }
         if (sprite && spriteCv) {
             ctx.globalAlpha = 0.9;
             ctx.drawImage(spriteCv, sprite.x, sprite.y);
@@ -117,7 +142,7 @@ export function CanvasBoard({
             ctx.strokeRect(x0 + lw / 2, y0 + lw / 2, x1 - x0 - lw, y1 - y0 - lw);
         }
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-    }, [baseCv, overlays, selection, sprite, spriteCv, spriteValid, view]);
+    }, [baseCv, overlays, selection, sprite, spriteCv, bgCvs, spriteValid, view]);
 
     // pointer position in backing-canvas coordinates (before the view transform)
     const toCanvas = useCallback((e: { clientX: number; clientY: number }) => {
@@ -223,14 +248,22 @@ export function CanvasBoard({
                         return;
                     }
                     const p = toPixel(e);
-                    if (sprite && onSpriteMove) {
-                        const inside = p.x >= sprite.x && p.x < sprite.x + sprite.w
-                            && p.y >= sprite.y && p.y < sprite.y + sprite.h;
-                        grabRef.current = inside
-                            ? { dx: p.x - sprite.x, dy: p.y - sprite.y }
-                            : { dx: Math.floor(sprite.w / 2), dy: Math.floor(sprite.h / 2) };
-                        dragRef.current = p;
-                        moveSpriteTo(p);
+                    if (onSpriteSelect || (sprite && onSpriteMove)) {   // paint (image) mode
+                        // grab + drag the ACTIVE image only when clicking inside it
+                        if (sprite && onSpriteMove) {
+                            const inside = p.x >= sprite.x && p.x < sprite.x + sprite.w
+                                && p.y >= sprite.y && p.y < sprite.y + sprite.h;
+                            if (inside) {
+                                grabRef.current = { dx: p.x - sprite.x, dy: p.y - sprite.y };
+                                dragRef.current = p;
+                                return;
+                            }
+                        }
+                        // clicked OFF the active image: select another image under the
+                        // cursor, else deselect (remove focus) — never move on a bare click
+                        const hit = [...bgSprites].reverse().find((s) =>
+                            p.x >= s.x && p.x < s.x + s.w && p.y >= s.y && p.y < s.y + s.h);
+                        onSpriteSelect?.(hit && hit.id != null ? hit.id : null);
                     } else if (onSelect) {
                         dragRef.current = p;
                         emitSelect(p, p);

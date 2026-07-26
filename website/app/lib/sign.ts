@@ -72,6 +72,20 @@ const isMissingInputKeyError = (e: unknown): boolean =>
         String((e as { info?: string; message?: string })?.info ?? (e as Error)?.message ?? e),
     );
 
+// The SUBMIT-side twin of the race above. blockfrost's submit endpoint is
+// shared/load-balanced: a child tx can reach a backend node that hasn't yet
+// ingested its (still-mempool) PARENT, so the chained input reads as missing or
+// spent. The node rejects with BadInputsUTxO / TranslationLogicMissingInput, and
+// — because the same parent output also funds collateral — often NoCollateral /
+// ValueNotConserved too. All are propagation symptoms, not real invalidity: they
+// clear once the parent settles on-chain (then every node sees it). We only ever
+// treat these as transient when there's a parent AND after confirming it, and we
+// retry a child at most once, so a genuinely invalid tx still surfaces promptly.
+const isChainPropagationError = (e: unknown): boolean =>
+    /BadInputsUTxO|TranslationLogicMissingInput|MissingInput|ValueNotConserved|NoCollateralInputs|InsufficientCollateral|inputs are spent|already been included|already exists/i.test(
+        String((e as { info?: string; message?: string })?.info ?? (e as Error)?.message ?? e),
+    );
+
 // ---- progress reporting (drives the signing modal) -------------------------
 export type SignPhase = "signing" | "submitting" | "confirming" | "done";
 export interface SignProgress {
@@ -121,10 +135,26 @@ export async function signAndSubmitAll(
         const witnesses = await bulk(txs.map((cbor) => ({ cbor, partialSign: true })));
         if (!Array.isArray(witnesses) || witnesses.length !== total)
             throw new Error("wallet returned an unexpected signTxs result");
+        // Fast path: submit the pre-signed chain back-to-back. If blockfrost's
+        // submit node ever lags behind a parent, settle that parent on-chain, retry
+        // the child, and confirm every REMAINING child up front — reliable tail
+        // (this is what made mainnet hatching 100% reliable).
+        let confirmEach = false;
         for (let i = 0; i < total; i++) {
+            if (confirmEach && i > 0) { report(i + 1, "confirming", true); await waitConfirmed(hashes[i - 1]); }
             report(i + 1, "submitting", true);
-            const { hash } = await submitTx(txs[i], witnesses[i]);
-            hashes.push(hash);
+            try {
+                const { hash } = await submitTx(txs[i], witnesses[i]);
+                hashes.push(hash);
+            } catch (e) {
+                const parent = hashes[i - 1];
+                if (!parent || !isChainPropagationError(e)) throw e;
+                confirmEach = true;
+                report(i + 1, "confirming", true);
+                await waitConfirmed(parent);
+                const { hash } = await submitTx(txs[i], witnesses[i]);
+                hashes.push(hash);
+            }
         }
         report(total, "done", true);
         return hashes;
@@ -137,7 +167,12 @@ export async function signAndSubmitAll(
     // per tx for a block. (NOT chaining would make tx[i+1] reference a wallet utxo
     // already spent by tx[i] in the mempool, and the wallet then reports "does not
     // have the secret key associated with any of the inputs and certificates".)
+    let confirmEach = false;   // escalate to confirm-each after the first stumble
     for (let i = 0; i < total; i++) {
+        // once a prior child hit the propagation race, settle each parent on-chain
+        // BEFORE signing the next: the wallet then resolves the chained input from
+        // the ledger (not the mempool), and the submit node can't reject it either.
+        if (confirmEach && i > 0) { report(i + 1, "confirming", false); await waitConfirmed(hashes[i - 1]); }
         report(i + 1, "signing", false);
         let witnesses: string;
         try {
@@ -148,6 +183,7 @@ export async function signAndSubmitAll(
             // reach the wallet, then retry the signature once.
             const parent = hashes[i - 1];
             if (!isMissingInputKeyError(e) || !parent) throw e;
+            confirmEach = true;
             report(i + 1, "confirming", false);
             await waitConfirmed(parent);
             await new Promise((r) => setTimeout(r, 5000));
@@ -155,8 +191,20 @@ export async function signAndSubmitAll(
             witnesses = await api.signTx(txs[i], true);
         }
         report(i + 1, "submitting", false);
-        const { hash } = await submitTx(txs[i], witnesses);
-        hashes.push(hash);
+        try {
+            const { hash } = await submitTx(txs[i], witnesses);
+            hashes.push(hash);
+        } catch (e) {
+            // submit node hasn't ingested the parent yet — settle it on-chain and
+            // resubmit this (already-signed) child, then confirm the rest up front.
+            const parent = hashes[i - 1];
+            if (!parent || !isChainPropagationError(e)) throw e;
+            confirmEach = true;
+            report(i + 1, "confirming", false);
+            await waitConfirmed(parent);
+            const { hash } = await submitTx(txs[i], witnesses);
+            hashes.push(hash);
+        }
     }
     report(total, "done", false);
     return hashes;

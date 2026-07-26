@@ -18,6 +18,8 @@ export interface Sprite {
 export interface PlacedSprite extends Sprite {
     x: number;
     y: number;
+    /** stable id for multi-image editing (React keys, active selection) */
+    id?: number;
 }
 
 export function loadImage(file: File): Promise<HTMLImageElement> {
@@ -30,10 +32,12 @@ export function loadImage(file: File): Promise<HTMLImageElement> {
     });
 }
 
-/** downscale + grayscale an image into a sprite `targetW` pixels wide */
-export function pixelify(img: HTMLImageElement, targetW: number): Sprite {
+/** downscale + grayscale an image (or another canvas) into a sprite `targetW` wide */
+export function pixelify(img: HTMLImageElement | HTMLCanvasElement, targetW: number): Sprite {
+    const srcW = (img as HTMLImageElement).naturalWidth || img.width;
+    const srcH = (img as HTMLImageElement).naturalHeight || img.height;
     const w = Math.max(1, Math.min(1008, Math.round(targetW)));
-    const h = Math.max(1, Math.min(1008, Math.round((img.naturalHeight / img.naturalWidth) * w)));
+    const h = Math.max(1, Math.min(1008, Math.round((srcH / srcW) * w)));
     const cv = document.createElement("canvas");
     cv.width = w; cv.height = h;
     const ctx = cv.getContext("2d", { willReadFrequently: true })!;
@@ -99,4 +103,29 @@ export function loadSavedSprite(): PlacedSprite | null {
 
 export function clearSavedSprite(): void {
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+}
+
+// ---- multi-image edit session (Studio page) --------------------------------
+const MULTI_KEY = "masterpiece.sprites";
+
+export function saveSprites(arr: PlacedSprite[]): void {
+    try {
+        localStorage.setItem(MULTI_KEY, JSON.stringify(arr.map((s) => ({
+            id: s.id, w: s.w, h: s.h, x: s.x, y: s.y,
+            pixels: b64(s.pixels), opaque: b64(s.opaque),
+        }))));
+    } catch { /* storage full/unavailable: preview-only */ }
+}
+
+export function loadSavedSprites(): PlacedSprite[] {
+    try {
+        const raw = localStorage.getItem(MULTI_KEY);
+        if (!raw) return [];
+        const j = JSON.parse(raw) as { id?: number; w: number; h: number; x: number; y: number; pixels: string; opaque: string }[];
+        return j.map((s) => ({ id: s.id, w: s.w, h: s.h, x: s.x, y: s.y, pixels: unb64(s.pixels), opaque: unb64(s.opaque) }));
+    } catch { return []; }
+}
+
+export function clearSprites(): void {
+    try { localStorage.removeItem(MULTI_KEY); } catch { /* ignore */ }
 }
