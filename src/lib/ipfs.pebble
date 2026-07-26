@@ -1,0 +1,122 @@
+// On-chain IPFS CIDv1 computation — byte-exact with `ipfs add --cid-version=1 --raw-leaves`
+// (kubo / js-ipfs-unixfs-importer). Verified against generated golden vectors; see
+// onchain/lib/ipfs_golden.test.pebble (produced by scripts that run the reference impl).
+//
+// A whole-file CID is the sha2-256 of a dag-pb (UnixFS) root node that links the raw-leaf
+// chunks. Plutus has sha2_256 as a builtin (byte-identical to standard sha256, verified),
+// so the only real work is reproducing IPFS's protobuf framing exactly:
+//
+//   leaf CID  = 0x01 0x55 0x12 0x20 || sha256(chunk)              (CIDv1, codec raw=0x55)
+//   root node = [ PBLink per chunk (Links, field 2, first) ] || [ UnixFS Data (field 1) ]
+//   PBLink    = 12 <len> | 0a 24 <36-byte CID> | 12 00 (empty Name) | 18 <varint Tsize>
+//   UnixFS    = 08 02 (Type=File) | 18 <varint filesize> | { 20 <varint blocksize> }*
+//   whole CID = 0x01 0x70 0x12 0x20 || sha256(root node)          (CIDv1, codec dag-pb=0x70)
+//
+// Assumes a single dag-pb root over raw leaves (file <= maxLinks*chunkSize, ~44 MiB at
+// defaults). Deeper balanced DAGs reuse pbLink/uvarint over intermediate nodes (codec 0x70,
+// Tsize = cumulative). The hard-coded `0a 24` assumes 36-byte CIDv1 hashes (always true here).
+
+// one byte of value v (0..255) as a bytestring
+function rb(v: int): bytes { return std.builtins.replicateByte(1, v); }
+
+// LEB128 unsigned varint (supports values < 2^35 — ample for canvas byte sizes)
+export function uvarint(n: int): bytes {
+    let b0 = n % 128; let r0 = n / 128;
+    let b1 = r0 % 128; let r1 = r0 / 128;
+    let b2 = r1 % 128; let r2 = r1 / 128;
+    let b3 = r2 % 128; let r3 = r2 / 128;
+    let b4 = r3 % 128;
+    return (r0 == 0) ? rb(b0)
+        : (r1 == 0) ? std.bytes.concat(rb(b0 + 128), rb(b1))
+        : (r2 == 0) ? std.bytes.concat(rb(b0 + 128), std.bytes.concat(rb(b1 + 128), rb(b2)))
+        : (r3 == 0) ? std.bytes.concat(rb(b0 + 128), std.bytes.concat(rb(b1 + 128), std.bytes.concat(rb(b2 + 128), rb(b3))))
+        : std.bytes.concat(rb(b0 + 128), std.bytes.concat(rb(b1 + 128), std.bytes.concat(rb(b2 + 128), std.bytes.concat(rb(b3 + 128), rb(b4)))));
+}
+
+// CIDv1 raw (leaf) from chunk content
+export function cidV1Raw(content: bytes): bytes {
+    return std.bytes.concat(#01551220, std.crypto.sha2_256(content));
+}
+
+// one PBLink (field 2 of the root): 12 <len> | 0a 24 <cid> | 12 00 | 18 <varint tsize>
+export function pbLink(childCid: bytes, tsize: int): bytes {
+    let body = std.bytes.concat(std.bytes.concat(std.bytes.concat(#0a24, childCid), #120018), uvarint(tsize));
+    return std.bytes.concat(std.bytes.concat(#12, uvarint(body.length())), body);
+}
+
+// UnixFS Data message for a File: 08 02 | 18 <varint filesize> | { 20 <varint blocksize> }*
+export function unixfsFile(filesize: int, blocksizes: List<int>): bytes {
+    let acc = std.bytes.concat(#0802, std.bytes.concat(#18, uvarint(filesize)));
+    // walk with head/tail: per-iteration indexing (`blocksizes[i]`) re-traverses
+    // the list every access and blows the CPU budget on 129-link files
+    let bs = blocksizes;
+    const n = blocksizes.length();
+    for (let i = 0; i < n; i = i + 1) {
+        acc = std.bytes.concat(acc, std.bytes.concat(#20, uvarint(bs.head())));
+        bs = bs.tail();
+    }
+    return acc;
+}
+
+// serialized dag-pb root node: all Links (field 2) first, then the Data field (field 1)
+export function dagPbFileRoot(childCids: List<bytes>, tsizes: List<int>, filesize: int, blocksizes: List<int>): bytes {
+    let links = #;
+    // head/tail walk instead of per-iteration `[i]` indexing (see unixfsFile)
+    let cids = childCids;
+    let ts = tsizes;
+    const n = childCids.length();
+    for (let i = 0; i < n; i = i + 1) {
+        links = std.bytes.concat(links, pbLink(cids.head(), ts.head()));
+        cids = cids.tail();
+        ts = ts.tail();
+    }
+    let dat = unixfsFile(filesize, blocksizes);
+    let dataField = std.bytes.concat(std.bytes.concat(#0a, uvarint(dat.length())), dat);
+    return std.bytes.concat(links, dataField);
+}
+
+// whole-image CIDv1 (dag-pb, codec 0x70) over the raw-leaf chunks
+export function wholeImageCid(childCids: List<bytes>, tsizes: List<int>, filesize: int, blocksizes: List<int>): bytes {
+    return std.bytes.concat(#01701220, std.crypto.sha2_256(dagPbFileRoot(childCids, tsizes, filesize, blocksizes)));
+}
+
+// ---------------------------------------------------------------------------
+// CIDv1 -> base32 multibase string ("bafy...") for the CIP-68 `image` field, so
+// wallets/explorers display the whole image from standard metadata. RFC4648 base32
+// (lowercase, no padding) + multibase prefix 'b'. Bit ops via /,% (Pebble has no <<,&).
+// ---------------------------------------------------------------------------
+
+// alphabet "abcdefghijklmnopqrstuvwxyz234567"; map a 5-bit index (0..31) to its char byte
+function b32char(idx: int): bytes {
+    return std.builtins.replicateByte(1,
+        std.bytes.indexAt(#6162636465666768696a6b6c6d6e6f707172737475767778797a323334353637, idx));
+}
+
+// one 5-byte (40-bit) group -> 8 base32 chars
+function b32group(d: bytes, off: int): bytes {
+    let b0 = std.bytes.indexAt(d, off);
+    let b1 = std.bytes.indexAt(d, off + 1);
+    let b2 = std.bytes.indexAt(d, off + 2);
+    let b3 = std.bytes.indexAt(d, off + 3);
+    let b4 = std.bytes.indexAt(d, off + 4);
+    return std.bytes.concat(
+        std.bytes.concat(
+            std.bytes.concat(b32char(b0 / 8), b32char((b0 % 8) * 4 + b1 / 64)),
+            std.bytes.concat(b32char((b1 / 2) % 32), b32char((b1 % 2) * 16 + b2 / 16))),
+        std.bytes.concat(
+            std.bytes.concat(b32char((b2 % 16) * 2 + b3 / 128), b32char((b3 / 4) % 32)),
+            std.bytes.concat(b32char((b3 % 4) * 8 + b4 / 32), b32char(b4 % 32))));
+}
+
+// base32 of a 36-byte CIDv1 (7 full groups + 1 leftover byte -> 58 chars), 'b'-prefixed
+export function base32Cid(cid: bytes): bytes {
+    let out = #62;                                  // multibase 'b'
+    for (let g = 0; g < 7; g = g + 1) { out = std.bytes.concat(out, b32group(cid, g * 5)); }
+    let b = std.bytes.indexAt(cid, 35);             // last byte -> 2 chars (8 bits, left-padded)
+    return std.bytes.concat(out, std.bytes.concat(b32char(b / 8), b32char((b % 8) * 4)));
+}
+
+// CIP-68 `image` value: "ipfs://" + base32 CIDv1
+export function cidToIpfsUri(cid: bytes): bytes {
+    return std.bytes.concat(#697066733a2f2f, base32Cid(cid));   // "ipfs://" ++ bafy...
+}

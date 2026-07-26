@@ -1,0 +1,203 @@
+// ===========================================================================
+//  Marketplace — secondary market for Ownership deed NFTs
+// ===========================================================================
+//
+//  Two kinds of orders, one state each:
+//
+//  * `Listing` — a seller locks ONE deed NFT here asking `pricePerPixel`
+//    lovelace per pixel of its rect.
+//    - `buy`:        anyone may take the listed value by paying
+//                    `pricePerPixel * area(rect)` to the seller in the same
+//                    tx. The payment output must carry the spent listing's
+//                    own TxOutRef as inline datum: that ref is unique per
+//                    listing, so one payment can never satisfy two orders
+//                    (no double satisfaction, in this or any other protocol).
+//    - `partialBuy`: buy ANY sub-rect of the listed deed in ONE tx. The tx
+//                    composes with the Ownership policy's `carve` mint
+//                    (parent burned, bought sub-rect + its ≤4 guillotine
+//                    complements minted, geometry fully validated there):
+//                    the buyer takes the bought piece paying for ITS area
+//                    only, and every complement goes straight back into a
+//                    fresh Listing with the same seller and price (the
+//                    buyer funds the new listings' min-ada).
+//    - `cancel`:     the seller signs and takes the listing back.
+//
+//  * `Request` — a buyer locks an offer (whatever value sits on the UTxO)
+//    asking for the deed named after `coords` (see rectName: deed names are
+//    canonical, one token per name can exist).
+//    - `fill`:   anyone holding that deed may take the offer by delivering
+//                the deed to the requester in the same tx.
+//    - `cancel`: the requester signs and takes the offer back.
+//
+//  Sellers and requesters must be pubkey addresses (cancel authenticates via
+//  `requiredSigners`; script-credentialed owners cannot sign).
+//
+//  A bare fallback `spend` covers UTxOs whose datum is ill-formed (or
+//  missing): such value was sent here by mistake, belongs to nobody the
+//  script can identify, and is deliberately left claimable by anyone so it
+//  does not clutter the address forever.
+
+import { Coordinates, rectName, rectArea } from "./lib/rect.pebble";
+
+// ada floor for a relisted complement (covers min-ada of a 1-deed listing)
+const MIN_LISTING_LOVELACE = 2_000_000;
+
+contract Marketplace {
+
+    // policy of the Ownership deed NFTs this market trades
+    param collectionPolicy: bytes;
+
+    state Listing {
+        seller: Address;
+        pricePerPixel: int; // lovelace per pixel of the listed deed's rect
+
+        // buy the whole listed deed. `rect` names WHICH deed this listing
+        // sells (validators format names, never parse them): it must sit in
+        // the spent utxo, and it prices the sale
+        spend buy( rect: Coordinates ) {
+            const { tx, spendingRef, state: { seller, pricePerPixel } } = context;
+
+            // exactly one marketplace input: a tx cannot take two orders
+            // against a single payment
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+
+            assert ownInput.resolved.value.amountOf( this.collectionPolicy, rectName( rect ) ) == 1;
+
+            // the seller is paid for the full area, and the payment is
+            // pinned to THIS listing by tagging it with the spent utxo ref
+            // (unique by construction)
+            const Some{ value: payOut } = tx.outputs.find( o =>
+                o.address == seller
+            );
+            assert payOut.value.lovelaces() >= pricePerPixel * rectArea( rect );
+            const InlineDatum{ datum: tagData } = payOut.datum;
+            const TxOutRef{ id: tagId, index: tagIndex } = tagData as TxOutRef;
+            assert tagId == spendingRef.id && tagIndex == spendingRef.index;
+        }
+
+        // buy ANY sub-rect `bought` of the listed deed `parent` in one tx.
+        // The tx must run the Ownership policy's `carve` mint: parent
+        // burned, bought + its validator-computed guillotine complements
+        // minted (geometry and exact mint fully validated THERE). Every
+        // complement must come back here as a fresh Listing on the same
+        // terms — same seller, same price — one output per complement, in
+        // carve's fixed order (top, bottom, left, right). The buyer takes
+        // `bought`, pays for its area only, and funds the min-ada of the
+        // new listings.
+        //
+        // Complement deeds cannot pre-exist (their area was covered by
+        // `parent` — tiling invariant), so an output holding one proves it
+        // was minted by THIS tx's carve.
+        spend partialBuy(
+            parent: Coordinates,
+            bought: Coordinates
+        ) {
+            const { tx, spendingRef, state: { seller, pricePerPixel } } = context;
+
+            // exactly one marketplace input (as in `buy`)
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+
+            const ownPolicy = this.collectionPolicy;
+            assert ownInput.resolved.value.amountOf( ownPolicy, rectName( parent ) ) == 1;
+
+            // pin WHICH carve runs in this tx
+            assert tx.mint.amountOf( ownPolicy, rectName( parent ) ) == -1;
+            assert tx.mint.amountOf( ownPolicy, rectName( bought ) ) == 1;
+
+            // every complement of `bought` in `parent` (same computation and
+            // order as `carve`) is relisted on the same terms; no other
+            // outputs may target the marketplace
+            const relistOuts = tx.outputs.filter( o => o.address == ownAddr );
+            let k = 0;
+            if( parent.y0 < bought.y0 ) {
+                const InlineDatum{ datum: dTop } = relistOuts[k].datum;
+                const Listing{ seller: sTop, pricePerPixel: pTop } = dTop as Marketplace;
+                assert sTop == seller && pTop == pricePerPixel;
+                assert relistOuts[k].value.amountOf( ownPolicy, rectName( Coordinates.Coordinates{ x0: parent.x0, y0: parent.y0, x1: parent.x1, y1: bought.y0 } ) ) == 1;
+                assert relistOuts[k].value.lovelaces() >= MIN_LISTING_LOVELACE;
+                k = k + 1;
+            }
+            if( bought.y1 < parent.y1 ) {
+                const InlineDatum{ datum: dBottom } = relistOuts[k].datum;
+                const Listing{ seller: sBottom, pricePerPixel: pBottom } = dBottom as Marketplace;
+                assert sBottom == seller && pBottom == pricePerPixel;
+                assert relistOuts[k].value.amountOf( ownPolicy, rectName( Coordinates.Coordinates{ x0: parent.x0, y0: bought.y1, x1: parent.x1, y1: parent.y1 } ) ) == 1;
+                assert relistOuts[k].value.lovelaces() >= MIN_LISTING_LOVELACE;
+                k = k + 1;
+            }
+            if( parent.x0 < bought.x0 ) {
+                const InlineDatum{ datum: dLeft } = relistOuts[k].datum;
+                const Listing{ seller: sLeft, pricePerPixel: pLeft } = dLeft as Marketplace;
+                assert sLeft == seller && pLeft == pricePerPixel;
+                assert relistOuts[k].value.amountOf( ownPolicy, rectName( Coordinates.Coordinates{ x0: parent.x0, y0: bought.y0, x1: bought.x0, y1: bought.y1 } ) ) == 1;
+                assert relistOuts[k].value.lovelaces() >= MIN_LISTING_LOVELACE;
+                k = k + 1;
+            }
+            if( bought.x1 < parent.x1 ) {
+                const InlineDatum{ datum: dRight } = relistOuts[k].datum;
+                const Listing{ seller: sRight, pricePerPixel: pRight } = dRight as Marketplace;
+                assert sRight == seller && pRight == pricePerPixel;
+                assert relistOuts[k].value.amountOf( ownPolicy, rectName( Coordinates.Coordinates{ x0: bought.x1, y0: bought.y0, x1: parent.x1, y1: bought.y1 } ) ) == 1;
+                assert relistOuts[k].value.lovelaces() >= MIN_LISTING_LOVELACE;
+                k = k + 1;
+            }
+            // bought == parent is a whole buy: use `buy`, not a carve
+            assert k >= 1;
+            assert relistOuts.length() == k;
+
+            // pay for exactly the bought area, tagged to this listing
+            const Some{ value: payOut } = tx.outputs.find( o =>
+                o.address == seller
+            );
+            assert payOut.value.lovelaces() >= pricePerPixel * rectArea( bought );
+            const InlineDatum{ datum: tagData } = payOut.datum;
+            const TxOutRef{ id: tagId, index: tagIndex } = tagData as TxOutRef;
+            assert tagId == spendingRef.id && tagIndex == spendingRef.index;
+        }
+
+        spend cancel() {
+            const { tx, state: { seller } } = context;
+            const PubKey{ hash: sellerPkh } = seller.payment;
+            assert tx.requiredSigners.includes( sellerPkh );
+        }
+    }
+
+    state Request {
+        requester: Address;
+        coords: Coordinates;
+
+        spend fill() {
+            const { tx, spendingRef, state: { requester, coords } } = context;
+
+            // exactly one marketplace input: one delivered deed cannot fill
+            // two identical requests
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+
+            // the requested deed reaches the requester. Deed names are
+            // unique (ownership tiling invariant), so this output cannot
+            // satisfy anything else
+            const wanted = rectName( coords );
+            const Some{ value: delivery } = tx.outputs.find( o =>
+                o.address == requester
+                && o.value.amountOf( this.collectionPolicy, wanted ) == 1
+            );
+        }
+
+        spend cancel() {
+            const { tx, state: { requester } } = context;
+            const PubKey{ hash: requesterPkh } = requester.payment;
+            assert tx.requiredSigners.includes( requesterPkh );
+        }
+    }
+
+    // fallback for ill-formed / missing datums: value nobody can be refunded
+    // to — anyone may sweep it
+    spend recover() {}
+
+}

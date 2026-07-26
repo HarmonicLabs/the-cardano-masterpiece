@@ -1,0 +1,277 @@
+/* ===========================================================================
+   The Cardano Masterpiece — gallery theme
+   Dark: charcoal museum walls, brass accents. Light: warm ivory paper.
+   =========================================================================== */
+:root {
+    color-scheme: light dark;
+    --bg:        light-dark(#f5f2ea, #0d0d10);
+    --bg-soft:   light-dark(#efeadf, #131318);
+    --ink:       light-dark(#26241f, #eae7de);
+    --ink-soft:  light-dark(#26241fb0, #eae7deb0);
+    --ink-faint: light-dark(#26241f66, #eae7de59);
+    --line:      light-dark(#26241f22, #eae7de1c);
+    --line-soft: light-dark(#26241f14, #eae7de10);
+    --gold:      light-dark(#8f6f2f, #c9a86a);
+    --gold-soft: light-dark(#8f6f2f2b, #c9a86a26);
+    --gold-hot:  light-dark(#7a5c20, #e3c98e);
+    --card:      light-dark(#fffdf8cc, #17171dcc);
+    --mat:       light-dark(#fffef9, #101014);
+    --good:      light-dark(#33703f, #8fd4a0);
+    --bad:       light-dark(#a03636, #f09090);
+    --serif: "Didot", "Bodoni MT", "Playfair Display", "Cormorant Garamond", Georgia, "Times New Roman", serif;
+    --sans: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+}
+* { box-sizing: border-box; margin: 0; }
+html { scroll-behavior: smooth; }
+body {
+    font: 15.5px/1.6 var(--sans);
+    letter-spacing: .01em;
+    background:
+        radial-gradient(1200px 700px at 50% -10%, light-dark(#fffef942, #1c1a2211), transparent 70%),
+        radial-gradient(1000px 800px at 50% 115%, light-dark(#e7dfc966, #14121a30), transparent 60%),
+        var(--bg);
+    color: var(--ink);
+    min-height: 100vh; display: flex; flex-direction: column;
+}
+#root { display: contents; }
+::selection { background: var(--gold-soft); }
+
+/* ---- masthead ------------------------------------------------------------ */
+header {
+    display: flex; align-items: center; gap: 2rem; flex-wrap: wrap;
+    padding: 1.1rem clamp(1.2rem, 4vw, 2.6rem) 1rem;
+    border-bottom: 1px solid var(--line-soft);
+    background: linear-gradient(to bottom, light-dark(#fffdf850, #17171d50), transparent);
+}
+.brand { display: flex; flex-direction: column; gap: .1rem; }
+header h1 {
+    font-family: var(--serif);
+    font-size: 1.45rem; font-weight: 500; letter-spacing: .02em;
+    line-height: 1.15; white-space: nowrap;
+}
+header h1 .amp { color: var(--gold); }
+.brand small {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .34em;
+    color: var(--ink-faint);
+}
+nav { display: flex; gap: 1.6rem; }
+nav a {
+    position: relative;
+    padding: .35rem 0;
+    color: var(--ink-soft); text-decoration: none;
+    font-size: .74rem; text-transform: uppercase; letter-spacing: .22em;
+    transition: color .25s ease;
+}
+nav a::after {
+    content: ""; position: absolute; left: 0; right: 100%; bottom: 0;
+    height: 1px; background: var(--gold);
+    transition: right .3s ease;
+}
+nav a:hover { color: var(--ink); }
+nav a.active { color: var(--gold); }
+nav a.active::after, nav a:hover::after { right: 0; }
+
+/* ---- wallet -------------------------------------------------------------- */
+.walletbar { margin-left: auto; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.wallet-pill {
+    display: inline-flex; gap: .55rem; align-items: center;
+    padding: .34rem .85rem; border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    backdrop-filter: blur(8px);
+    font-size: .8rem;
+}
+.wallet-pill img { border-radius: 4px; }
+.wallet-pill code { color: var(--ink-faint); font-size: .72rem; font-family: var(--mono); }
+.wallet-pill b { color: var(--gold); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ---- controls ------------------------------------------------------------ */
+button, .filebtn {
+    font: inherit; font-size: .8rem; letter-spacing: .06em;
+    padding: .45rem 1.05rem; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line);
+    background: transparent; color: var(--ink);
+    display: inline-flex; gap: .45rem; align-items: center;
+    transition: border-color .25s ease, background .25s ease, transform .15s ease, box-shadow .25s ease;
+}
+button:hover:not(:disabled), .filebtn:hover {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px var(--gold-soft);
+}
+button:active:not(:disabled) { transform: translateY(1px); }
+button.primary {
+    border-color: transparent;
+    background: linear-gradient(160deg, var(--gold-hot), var(--gold));
+    color: light-dark(#fffdf6, #141310);
+    font-weight: 600;
+}
+button.primary:hover:not(:disabled) { box-shadow: 0 4px 18px var(--gold-soft), 0 0 0 3px var(--gold-soft); }
+button:disabled { opacity: .38; cursor: default; box-shadow: none; }
+.filebtn input[type="file"] { display: none; }
+input[type="range"] { accent-color: var(--gold); }
+input[type="color"] {
+    inline-size: 30px; block-size: 30px; padding: 0; border-radius: 8px;
+    border: 1px solid var(--line); background: transparent; cursor: pointer;
+}
+
+/* ---- layout -------------------------------------------------------------- */
+main {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    padding: clamp(1.4rem, 3.5vw, 2.6rem) 1.4rem 2rem; gap: .5rem;
+}
+section { display: flex; flex-direction: column; align-items: center; gap: 1.15rem; width: 100%; }
+.pagehead {
+    display: flex; flex-direction: column; align-items: center; gap: .45rem;
+    margin-bottom: .3rem;
+}
+.pagehead h2 {
+    font-family: var(--serif); font-weight: 500;
+    font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: .02em;
+}
+.pagehead::after {
+    content: ""; width: 54px; height: 1px;
+    background: linear-gradient(to right, transparent, var(--gold), transparent);
+}
+.tagline {
+    max-width: 44rem; text-align: center;
+    color: var(--ink-soft); font-size: .92rem; line-height: 1.7;
+}
+
+/* ---- the artwork --------------------------------------------------------- */
+.frame {
+    position: relative;
+    border: 1px solid var(--gold-soft);
+    outline: 1px solid var(--line-soft);
+    outline-offset: 6px;
+    background: var(--mat);
+    padding: clamp(10px, 1.6vw, 18px);
+    box-shadow:
+        0 30px 70px -30px rgba(0, 0, 0, .55),
+        0 4px 18px rgba(0, 0, 0, .18),
+        inset 0 0 0 1px var(--line-soft);
+    max-width: min(92vw, 780px); width: 100%;
+}
+.painter-frame { width: 100%; max-width: min(92vw, 820px); overflow: hidden; display: flex; justify-content: center; }
+canvas.board { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+/* scale to fit the frame in BOTH axes (replaced-element contain) so the
+   painter never overflows its div, whatever the plot's shape */
+canvas.painter { display: block; image-rendering: pixelated; max-width: 100%; max-height: 72vh; }
+.boardwrap { position: relative; }
+
+/* zoom strip: outside the artwork, hugging its top-left corner */
+.zoombar {
+    position: absolute; top: 0; right: 100%; margin-right: 22px; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px;
+    backdrop-filter: blur(8px);
+}
+@media (max-width: 900px) {
+    .zoombar { right: auto; left: 10px; top: 10px; margin-right: 0; }
+}
+.zoombar button {
+    width: 28px; height: 28px; padding: 0; line-height: 1; justify-content: center;
+    font-size: .95rem; border: none; border-radius: 50%;
+    background: transparent; color: var(--ink-soft);
+}
+.zoombar button:hover:not(:disabled) { background: var(--gold-soft); color: var(--ink); box-shadow: none; }
+.zoombar button:disabled { opacity: .3; }
+.zoombar button.active { background: var(--gold); color: light-dark(#fffdf6, #141310); }
+.zoomlvl {
+    font-size: .64rem; text-align: center; color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    writing-mode: vertical-rl; padding: 5px 0;
+    letter-spacing: .08em;
+}
+
+/* ---- plaque & stats ------------------------------------------------------ */
+.stats {
+    display: flex; flex-wrap: wrap; gap: .4rem 2.2rem; justify-content: center;
+    padding: .8rem 1.6rem;
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+    max-width: min(92vw, 780px);
+}
+.stats span {
+    display: flex; flex-direction: column-reverse; align-items: center; gap: .05rem;
+    font-size: .6rem; text-transform: uppercase; letter-spacing: .22em;
+    color: var(--ink-faint);
+}
+.stats b {
+    font-family: var(--serif); font-weight: 500; letter-spacing: .02em;
+    font-size: 1.05rem; color: var(--ink);
+    font-variant-numeric: tabular-nums; text-transform: none;
+}
+.uri {
+    font-family: var(--mono); font-size: .68rem; word-break: break-all;
+    color: var(--ink-faint); text-align: center; max-width: min(92vw, 780px);
+}
+
+/* ---- action rows --------------------------------------------------------- */
+.actionbar {
+    display: flex; gap: .9rem 1.4rem; align-items: center; flex-wrap: wrap; justify-content: center;
+    font-size: .86rem; color: var(--ink-soft);
+    max-width: min(92vw, 900px);
+}
+.actionbar code { font-family: var(--mono); font-size: .78rem; color: var(--ink); }
+.actionbar label { display: inline-flex; gap: .55rem; align-items: center; }
+.modeswitch { display: inline-flex; gap: 0; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+.modeswitch button { border: 0; border-radius: 0; margin: 0; }
+.modeswitch button + button { border-left: 1px solid var(--line-soft); }
+.swatch {
+    width: 20px; height: 20px; border-radius: 6px;
+    border: 1px solid var(--line); display: inline-block;
+    box-shadow: inset 0 0 0 2px light-dark(#ffffff88, #00000055);
+}
+.err { color: var(--bad); font-size: .84rem; max-width: min(92vw, 780px); word-break: break-word; text-align: center; }
+.ok { color: var(--good); font-size: .84rem; word-break: break-all; max-width: min(92vw, 780px); text-align: center; }
+.ok code, .err code { font-family: var(--mono); font-size: .76rem; }
+.muted { color: var(--ink-faint); font-size: .84rem; }
+
+/* ---- market -------------------------------------------------------------- */
+.order-panel {
+    padding: .8rem 1.4rem;
+    border: 1px solid var(--gold-soft);
+    background: var(--card);
+    backdrop-filter: blur(8px);
+    border-radius: 12px;
+}
+.order-panel input[type="number"], .actionbar input[type="number"] {
+    font: inherit; padding: .3rem .5rem; border-radius: 8px;
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
+}
+.coords { color: var(--ink-faint); }
+.coords input[type="number"] {
+    width: 4.4rem; text-align: center;
+    font-variant-numeric: tabular-nums; font-size: .82rem;
+}
+.market-cols {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.4rem; width: 100%; max-width: min(92vw, 900px); margin-top: .6rem;
+}
+.market-col h3 {
+    font-family: var(--serif); font-weight: 500; font-size: 1.15rem;
+    padding-bottom: .5rem; margin-bottom: .8rem;
+    border-bottom: 1px solid var(--line-soft);
+}
+.market-col h3 small { color: var(--gold); font-size: .8rem; margin-left: .4rem; }
+.order-card {
+    display: flex; flex-direction: column; gap: .15rem;
+    padding: .8rem 1rem; margin-bottom: .7rem;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--card); font-size: .84rem;
+    transition: border-color .25s ease;
+}
+.order-card:hover { border-color: var(--gold-soft); }
+.order-card code { font-family: var(--mono); font-size: .78rem; color: var(--gold); }
+.order-actions { display: flex; gap: .6rem; margin-top: .5rem; }
+
+/* ---- footer -------------------------------------------------------------- */
+footer {
+    text-align: center; padding: 1.4rem;
+    border-top: 1px solid var(--line-soft);
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .28em;
+    color: var(--ink-faint);
+}

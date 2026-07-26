@@ -1,0 +1,22 @@
+{
+  "name": "@masterpiece/offchain",
+  "private": true,
+  "type": "module",
+  "description": "Off-chain for The Cardano Masterpiece: buildooor tx builders + local devnet e2e.",
+  "scripts": {
+    "e2e": "tsx e2e.ts",
+    "e2e:preprod": "BACKEND=preprod tsx e2e.ts",
+    "probe:oinit": "tsx probe-oinit.ts",
+    "probe:mpinit": "tsx probe-mpinit.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@harmoniclabs/blockfrost-pluts": "^0.5.1",
+    "@harmoniclabs/buildooor": "^0.2.9"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  }
+}

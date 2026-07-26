@@ -1,0 +1,12 @@
+{
+  "name": "the-cardano-masterpiece",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "pebble compile --config ./pebble.config.json",
+    "compile:local": "node ./offchain/node_modules/.bin/tsx scripts/compile-local.ts"
+  },
+  "dependencies": {
+    "tslib": "^2.8.1"
+  }
+}

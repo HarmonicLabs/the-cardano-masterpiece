@@ -1,0 +1,19 @@
+// ===========================================================================
+//  Lock — an address where UTxOs are PERMANENTLY UNSPENDABLE.
+// ===========================================================================
+//
+//  The single state has no spend methods and there is no bare fallback, so
+//  every spend attempt fails dispatch regardless of datum (Locked, garbage,
+//  or none). Used to park the protocol's reference-script UTxOs immortally:
+//  nobody — deployer included — can ever consume them, so the deployments
+//  cannot be destroyed (the min-ada deposits become permanently locked).
+//
+//  This contract itself never needs a reference deployment: its validator
+//  only runs when someone attempts a spend, which always fails anyway.
+contract Lock {
+
+    state Locked {
+        unused: int;
+    }
+
+}

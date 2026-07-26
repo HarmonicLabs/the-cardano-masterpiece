@@ -1,0 +1,90 @@
+// ===========================================================================
+//  Rectangle utilities for the 1008x1008 canvas
+// ===========================================================================
+//
+//  Rectangles are half-open: [x0,x1) × [y0,y1), x in 0..1008, y in 0..1008.
+//  The height is 1008 = 12 * 84: the canvas divides into 84 uniform leaves
+//  of 12 rows (12096 bytes) each — a row-aligned chunk that leaves comfortable
+//  headroom in an edit transaction (see masterpiece.pebble).
+
+export const CANVAS_WIDTH  = 1008;
+export const CANVAS_HEIGHT = 1008;
+
+// half-open rectangle: [x0,x1) × [y0,y1)
+export struct Coordinates {
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int
+}
+
+export function isValidRect( r: Coordinates ): boolean {
+    return 0 <= r.x0 && r.x0 < r.x1 && r.x1 <= CANVAS_WIDTH
+        && 0 <= r.y0 && r.y0 < r.y1 && r.y1 <= CANVAS_HEIGHT;
+}
+
+export function rectContains( outer: Coordinates, inner: Coordinates ): boolean {
+    return outer.x0 <= inner.x0 && inner.x1 <= outer.x1
+        && outer.y0 <= inner.y0 && inner.y1 <= outer.y1;
+}
+
+export function rectArea( r: Coordinates ): int {
+    return (r.x1 - r.x0) * (r.y1 - r.y0);
+}
+
+// `a` and `b` are a single straight (guillotine) cut of `p`, in order
+// (a left of b, or a above b); strict inequalities forbid degenerate halves
+export function isGuillotineCut( p: Coordinates, a: Coordinates, b: Coordinates ): boolean {
+    const verticalCut =
+        a.x0 == p.x0 && a.x1 == b.x0 && b.x1 == p.x1
+        && a.y0 == p.y0 && a.y1 == p.y1
+        && b.y0 == p.y0 && b.y1 == p.y1
+        && a.x0 < a.x1 && b.x0 < b.x1;
+    const horizontalCut =
+        a.y0 == p.y0 && a.y1 == b.y0 && b.y1 == p.y1
+        && a.x0 == p.x0 && a.x1 == p.x1
+        && b.x0 == p.x0 && b.x1 == p.x1
+        && a.y0 < a.y1 && b.y0 < b.y1;
+    return verticalCut || horizontalCut;
+}
+
+// ---- coords -> asset name -------------------------------------------------
+//
+// Human-readable asset names: "masterpiece-x0-y0-x1-y1" in ASCII, canonical
+// decimal (no leading zeros) — e.g. "masterpiece-0-0-1024-1024" — so wallets
+// show both the collection and the plot at a glance. Canonical decimal +
+// fixed '-' separators keep the encoding injective (a name splits into
+// exactly four numbers), so a rect maps to exactly one name; worst case
+// "masterpiece-1024-1024-1024-1024" is 31 bytes, just under the 32-byte
+// asset-name limit. Consumers never parse names: they FORMAT a claimed rect
+// and look the name up.
+
+const NAME_PREFIX = #6d617374657270696563652d; // "masterpiece-"
+
+function decDigit( d: int ): bytes {
+    return std.builtins.replicateByte( 1, 48 + d ); // '0' + d
+}
+
+// canonical decimal for 0..9999 (ample for coords in 0..1024)
+function decNum( v: int ): bytes {
+    const last = decDigit( v % 10 );
+    return v < 10 ? last
+        : v < 100 ? std.bytes.concat( decDigit( v / 10 ), last )
+        : v < 1000 ? std.bytes.concat(
+            std.bytes.concat( decDigit( v / 100 ), decDigit( (v / 10) % 10 ) ), last )
+        : std.bytes.concat(
+            std.bytes.concat( decDigit( v / 1000 ), decDigit( (v / 100) % 10 ) ),
+            std.bytes.concat( decDigit( (v / 10) % 10 ), last ) );
+}
+
+// "masterpiece-x0-y0-x1-y1"
+export function rectName( r: Coordinates ): bytes {
+    return std.bytes.concat(
+        std.bytes.concat(
+            NAME_PREFIX,                                                      // "masterpiece-"
+            std.bytes.concat( decNum( r.x0 ), std.bytes.concat( #2d, decNum( r.y0 ) ) ) ), // "x0-y0"
+        std.bytes.concat(
+            std.bytes.concat( #2d, decNum( r.x1 ) ),                          // "-x1"
+            std.bytes.concat( #2d, decNum( r.y1 ) ) )                         // "-y1"
+    );
+}

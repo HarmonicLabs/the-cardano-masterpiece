@@ -1,0 +1,393 @@
+// ===========================================================================
+//  Masterpiece — the on-chain collaborative 1024x1024 image/bmp
+// ===========================================================================
+//
+//  The image is a top-down 8-bit BMP: a constant header+palette (the
+//  `bmpHeader` param, ~1078 bytes) followed by 1024 rows of 1024 one-byte
+//  pixels. Pixel rows are stored on-chain in 128 leaf UTxOs of 8 rows
+//  (8192 bytes) each: leaf i holds rows [8i, 8i+8).
+//
+//  The whole file is addressed on IPFS as one flat dag-pb (UnixFS) node
+//  linking 129 raw-leaf chunks: [ header, chunk 0 .. chunk 127 ]. The root
+//  UTxO tracks the 128 chunk CIDs and, on every commit, recomputes the
+//  whole-file CID on-chain — so the `image` URI in its CIP-68 metadata is
+//  *provably* the CID of the (last committed) canvas.
+//
+//  Tokens (all under this contract's policy, minted once in `init`):
+//    * (100)masterpiece — CIP-68 reference NFT, locked here forever with the
+//      RootNft datum (Constr 0 [metadata, version, extra] as CIP-68 demands;
+//      RootNft is deliberately the FIRST state declared).
+//    * (222)masterpiece — CIP-68 user token, freely tradeable; wallets
+//      holding it display the live canvas via the (100) datum.
+//    * 128 unnamed leaf tokens — internal state markers, one per leaf UTxO.
+//
+//  Editing is DECOUPLED from the root so leaf edits parallelize freely:
+//    * `LeafNode.edit` spends ONE leaf (one per tx — an 8KB chunk output
+//      barely fits the tx size limit) and never touches the root. Changed
+//      bytes must be covered by Ownership NFTs (policy =
+//      `ownershipContractHash`) present in REFERENCE inputs whose holding
+//      addresses SIGNED the tx — pub-key holders only, script-held
+//      ownership cannot edit. Different leaves = different UTxOs, so edits
+//      to different leaves land in the same block without contention.
+//    * `RootNft.commit` spends ONLY the root, REFERENCES any set of leaf
+//      UTxOs (redeemer indices sorted by ascending leaf index), and syncs
+//      their current CIDs into `leafsCids`, recomputing the whole-image CID
+//      and the CIP-68 `image` URI. Permissionless: the committer proves
+//      nothing — referenced leaf state is already validator-maintained
+//      truth. The root is thus an eventually-consistent snapshot: entries
+//      lag behind leaf edits until the next commit.
+
+import { cidV1Raw, cidToIpfsUri, wholeImageCid } from "./lib/ipfs.pebble";
+import { Coordinates, rectName } from "./lib/rect.pebble";
+
+const N_LEAFS = 84;
+const LINE_LENGTH = 1008;
+const ROWS_PER_LEAF = 12;
+const CHUNK_SIZE = LINE_LENGTH * ROWS_PER_LEAF; // 12096 bytes, 12 rows per leaf
+
+const LEAF_NFT_NAME = #; // empty name; internal marker, not CIP-68
+
+// CIP-67 labeled names, body "masterpiece"
+const ROOT_REF_NFT_NAME  = #000643b06d61737465727069656365; // (100)masterpiece
+const ROOT_USER_NFT_NAME = #000de1406d61737465727069656365; // (222)masterpiece
+
+// CIP-68 metadata: exactly these three keys, checked on every root update
+const METADATA_NAME_KEY       = #6e616d65;           // "name"
+const METADATA_IMAGE_KEY      = #696d616765;         // "image"
+const METADATA_MEDIA_TYPE_KEY = #6d6564696154797065; // "mediaType"
+const ROOT_DISPLAY_NAME = #5468652043617264616e6f204d61737465727069656365; // "The Cardano Masterpiece"
+const MEDIA_TYPE_BMP    = #696d6167652f626d70;       // "image/bmp"
+
+// mutable state beyond the CIP-68 metadata, kept under the `extra` field
+struct RootState {
+    leafsCids: List<bytes>, // 84 CIDs of the leaf chunks, in leaf order
+    rawCid: bytes           // 36-byte CIDv1 of the whole-image dag-pb root
+}
+
+// the all-white genesis chunk. replicateByte caps at 8192 bytes, so the
+// 12096-byte chunk is assembled from two 6048-byte halves.
+function initialChunkBytes(): bytes {
+    const half = std.builtins.replicateByte( CHUNK_SIZE / 2, 255 );
+    return std.bytes.concat( half, half );
+}
+
+// whole-image CID over [ header, leaf chunks... ] as one flat dag-pb node.
+// raw-leaf Tsize == blocksize, so one sizes list serves both roles.
+function wholeImageCidOf( header: bytes, leafsCids: List<bytes> ): bytes {
+    const headerLen = header.length();
+    let sizes: List<int> = [];
+    for( let i = 0; i < N_LEAFS; i++ ) {
+        sizes = sizes.prepend( CHUNK_SIZE );
+    }
+    sizes = sizes.prepend( headerLen );
+    return wholeImageCid(
+        leafsCids.prepend( cidV1Raw( header ) ),
+        sizes,
+        headerLen + N_LEAFS * CHUNK_SIZE,
+        sizes
+    );
+}
+
+contract Masterpiece {
+
+    param ownershipContractHash: bytes;
+    param genesisUtxo: TxOutRef;
+    param bmpHeader: bytes; // BMP header + 256-color palette (~1078 bytes),
+                            // immutable, top-down rows (negative biHeight)
+
+    // one-shot genesis: mint the two root tokens + 128 leaf markers. The
+    // leaf UTxOs themselves CANNOT be created here — 128 x 8KB datums is
+    // ~1MB, far past the 16KB tx limit — so all 128 markers land in a single
+    // Nursery UTxO and leaves are hatched one per tx afterwards (see
+    // Nursery.hatch below).
+    mint init(
+        genesisUtxoIdx: int
+    ) {
+        const { tx, policy } = context;
+
+        assert tx.inputs[genesisUtxoIdx].ref == this.genesisUtxo;
+
+        // exact mint. Values are canonically normalized, so data equality is
+        // order-independent — and unlike two-sided `contains` it stays total
+        // if the mint ever carries negatives (PEBBLE_BUGS.md BUG 18)
+        const expectedMint = tx.mint.scale( 0 )
+            .insert( policy, LEAF_NFT_NAME, N_LEAFS )
+            .insert( policy, ROOT_REF_NFT_NAME, 1 )
+            .insert( policy, ROOT_USER_NFT_NAME, 1 );
+        assert tx.mint.toData() == expectedMint.toData();
+
+        const ownAddr = Address.Address{
+            payment: Credential.Script{ hash: policy },
+            stake: undefined
+        };
+
+        // all 128 leaf markers in one Nursery node, ready to hatch leaf 0
+        const Some{ value: nurseryOut } =
+            tx.outputs.find( o => o.value.amountOf( policy, LEAF_NFT_NAME ) == N_LEAFS );
+        assert nurseryOut.address == ownAddr;
+        const InlineDatum{ datum: nd } = nurseryOut.datum;
+        const Nursery{ nextIdx: nx } = nd as Masterpiece;
+        assert nx == 0;
+
+        // the CIP-68 reference NFT with the root datum. Its leaf-CID list
+        // starts as 128 copies of the initial (all-white) chunk CID — exactly
+        // what every leaf will hold when hatched.
+        const Some{ value: rootOut } =
+            tx.outputs.find( o => o.value.amountOf( policy, ROOT_REF_NFT_NAME ) == 1 );
+        assert rootOut.address == ownAddr;
+
+        const InlineDatum{ datum: rd } = rootOut.datum;
+        const RootNft{ metadata: md, version: ver, extra: ext } = rd as Masterpiece;
+
+        // genesis honesty: every entry of the initial CID list must be the
+        // all-white chunk's CID. `initialCid` is a `const`: computed ONCE and
+        // accessed as a plain variable inside the lambda (compute-once
+        // verified after the BUG 16 fix — the check costs ~0.3B CPU steps)
+        const initialChunk = initialChunkBytes();
+        const initialCid = cidV1Raw( initialChunk );
+        assert ext.leafsCids.length() == N_LEAFS;
+        assert ext.leafsCids.every( c => c == initialCid );
+
+        const rootCid = wholeImageCidOf( this.bmpHeader, ext.leafsCids );
+        assert ext.rawCid == rootCid;
+
+        assert ver == 1;
+        assert md.length() == 3;
+        assert md.lookup( METADATA_NAME_KEY )! == ROOT_DISPLAY_NAME;
+        assert md.lookup( METADATA_IMAGE_KEY )! == cidToIpfsUri( rootCid );
+        assert md.lookup( METADATA_MEDIA_TYPE_KEY )! == MEDIA_TYPE_BMP;
+
+        // the (222) user token goes wherever the deployer likes
+    }
+
+    // CIP-68 reference-NFT state. MUST stay the first state declared:
+    // readers resolve the (100) token's datum as Constr 0 [metadata, version, extra]
+    state RootNft {
+        metadata: LinearMap<bytes, bytes>;
+        version: int;
+        extra: RootState;
+
+        // sync the referenced leaves' CIDs into the list, recompute the
+        // whole-image CID, and pin the CIP-68 metadata. Leaves are READ via
+        // reference inputs, never spent here. `commitRefIdxs`: indices into
+        // tx.refInputs of the committed leaves, ordered by ASCENDING leaf
+        // index. MANY leaves may be synced in one tx (bounded by tx size +
+        // script budget): syncing K stale leaves costs K reference inputs.
+        spend commit(
+            commitRefIdxs: List<int>
+        ) {
+            const { tx, spendingRef, state: { metadata, extra } } = context;
+
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            const ownPolicy = ownAddr.payment.hash();
+
+            // genuine root: carries the (100) reference NFT
+            assert ownInput.resolved.value.amountOf( ownPolicy, ROOT_REF_NFT_NAME ) == 1;
+
+            // continuing root output
+            const rootOuts = tx.outputs.filter( o =>
+                o.address == ownAddr
+                && o.value.amountOf( ownPolicy, ROOT_REF_NFT_NAME ) == 1
+            );
+            assert rootOuts.length() == 1;
+            const InlineDatum{ datum: rod } = rootOuts[0].datum;
+            const RootNft{ metadata: newMd, version: newVer, extra: newExt } =
+                rod as Masterpiece;
+            assert newExt.leafsCids.length() == N_LEAFS;
+
+            // new CID list = old list with EVERY committed leaf's position
+            // replaced by that leaf's current CID, byte-identical everywhere
+            // else. Walk positions 0..N_LEAFS-1 alongside a cursor over the
+            // committed leaves (ascending leaf idx): when the cursor's leaf
+            // sits at position j, take its CID and advance; else keep the old.
+            let refs = commitRefIdxs;
+            let remaining = commitRefIdxs.length();
+            let oldCids = extra.leafsCids;
+            let newCids = newExt.leafsCids;
+            let prevIdx = -1;
+            for( let j = 0; j < N_LEAFS; j++ ) {
+                const oldC = oldCids.head();
+                const newC = newCids.head();
+                let expectedC = oldC;
+                if( remaining > 0 ) {
+                    // genuine leaf: marker token at THIS script address; its
+                    // datum is validator-maintained truth, nothing more to prove
+                    const ri = tx.refInputs[ refs.head() ];
+                    assert ri.resolved.address == ownAddr;
+                    assert ri.resolved.value.amountOf( ownPolicy, LEAF_NFT_NAME ) == 1;
+                    const InlineDatum{ datum: rld } = ri.resolved.datum;
+                    const LeafNode{ idx: lidx, rawCid: lcid, chunk: lch } =
+                        rld as Masterpiece;
+                    if( lidx == j ) {
+                        assert lidx > prevIdx; // strictly ascending: no dup/reorder
+                        expectedC = lcid;
+                        prevIdx = lidx;
+                        refs = refs.tail();
+                        remaining = remaining - 1;
+                    }
+                }
+                assert newC == expectedC;
+                oldCids = oldCids.tail();
+                newCids = newCids.tail();
+            }
+            // every committed leaf must have matched a position (ascending order)
+            assert remaining == 0;
+
+            const newRootCid = wholeImageCidOf( this.bmpHeader, newExt.leafsCids );
+            assert newExt.rawCid == newRootCid;
+
+            // CIP-68 metadata: same 3 keys in the fixed [name, image,
+            // mediaType] order (pinned since init), image tracks the new
+            // CID. Read positionally: LinearMap.lookup mis-lowers to UPLC
+            // in 0.3.6 (PEBBLE_BUGS.md)
+            assert newVer == 1;
+            assert newMd.length() == 3;
+            assert newMd.lookup( METADATA_NAME_KEY )! == metadata.lookup( METADATA_NAME_KEY )!;
+            assert newMd.lookup( METADATA_MEDIA_TYPE_KEY )! == metadata.lookup( METADATA_MEDIA_TYPE_KEY )!;
+            assert newMd.lookup( METADATA_IMAGE_KEY )! == cidToIpfsUri( newRootCid );
+        }
+    }
+
+    // one 8192-byte chunk of pixel rows, marked by an unnamed leaf token
+    state LeafNode {
+        idx: int;      // 0..127
+        rawCid: bytes; // cidV1Raw( chunk )
+        chunk: bytes;  // 8192 bytes = rows [8*idx, 8*idx+8)
+
+        // chunk integrity + pixel ownership of every changed byte.
+        // `ownerRects`: the rects (sorted by x0) of the Ownership NFTs
+        // covering the changed pixels. The validator FORMATS each rect into
+        // its human-readable asset name — "masterpiece-x0-y0-x1-y1" — and
+        // requires that NFT; formatting is injective, so the redeemer can
+        // only name rects that were genuinely claimed.
+        spend edit(
+            ownerRects: List<Coordinates>
+        ) {
+            const { tx, spendingRef, state: { idx: li, chunk: oldChunk } } = context;
+
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            const ownPolicy = ownAddr.payment.hash();
+
+            // genuine leaf: carries a leaf marker token
+            assert ownInput.resolved.value.amountOf( ownPolicy, LEAF_NFT_NAME ) == 1;
+
+            // continuing leaf output (unique: leaf markers never leave, so a
+            // second spent leaf would surface as a second output here)
+            const leafOuts = tx.outputs.filter( o =>
+                o.address == ownAddr
+                && o.value.amountOf( ownPolicy, LEAF_NFT_NAME ) == 1
+            );
+            assert leafOuts.length() == 1;
+            const InlineDatum{ datum: lod } = leafOuts[0].datum;
+            const LeafNode{ idx: newIdx, rawCid: newCid, chunk: newChunk } =
+                lod as Masterpiece;
+
+            assert newIdx == li;
+            assert newChunk.length() == CHUNK_SIZE;
+            assert newCid == cidV1Raw( newChunk );
+
+            // ownership: every named NFT must sit in a reference input whose
+            // holder signed this tx. Pub-key holders only — script-held
+            // ownership NFTs cannot edit.
+            const ownershipHash = this.ownershipContractHash;
+            const nRects = ownerRects.length();
+            // head/tail walk — never index `ownerRects[n]` (each `[n]` is a
+            // dropList re-traversal); matches the Aiken port's shape
+            let refRects = ownerRects;
+            for( let n = 0; n < nRects; n++ ) {
+                const nm = rectName( refRects.head() );
+                const Some{ value: refIn } = tx.refInputs.find( i =>
+                    i.resolved.value.amountOf( ownershipHash, nm ) == 1
+                );
+                const PubKey{ hash: holderPkh } = refIn.resolved.address.payment;
+                assert tx.requiredSigners.includes( holderPkh );
+                refRects = refRects.tail();
+            }
+
+            // every byte outside the owned rects must be unchanged. Walk each
+            // of the 8 rows left to right; the rects covering the row (in x0
+            // order — enforced by the cursor monotonicity) delimit the
+            // must-be-equal gaps. Coords are half-open [x0,x1)x[y0,y1), rows
+            // top-down (the BMP header declares negative height).
+            for( let r = 0; r < ROWS_PER_LEAF; r++ ) {
+                const y = li * ROWS_PER_LEAF + r;
+                const rowOff = r * LINE_LENGTH;
+                let cursor = 0;
+                // head/tail walk of the rects for THIS row (reset each row) —
+                // never index `ownerRects[n]`; matches the Aiken port's shape
+                let rects = ownerRects;
+                for( let n = 0; n < nRects; n++ ) {
+                    const rc = rects.head();
+                    // rects not covering this row contribute an empty gap
+                    // and leave the cursor unmoved
+                    const covers = rc.y0 <= y && y < rc.y1;
+                    const gapEnd = covers ? rc.x0 : cursor;
+                    assert cursor <= gapEnd;
+                    assert std.bytes.slice( rowOff + cursor, gapEnd - cursor, oldChunk )
+                        == std.bytes.slice( rowOff + cursor, gapEnd - cursor, newChunk );
+                    cursor = covers ? rc.x1 : cursor;
+                    rects = rects.tail();
+                }
+                assert std.bytes.slice( rowOff + cursor, LINE_LENGTH - cursor, oldChunk )
+                    == std.bytes.slice( rowOff + cursor, LINE_LENGTH - cursor, newChunk );
+            }
+        }
+    }
+
+    // undistributed leaf markers, waiting to become leaf UTxOs. Genesis puts
+    // all 128 here (the leaf datums are ~8KB each and cannot share one tx);
+    // each hatch tx peels off exactly one leaf, in index order.
+    state Nursery {
+        nextIdx: int; // the leaf this nursery hatches next (0..127)
+
+        spend hatch() {
+            const { tx, spendingRef, state: { nextIdx } } = context;
+
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            const ownPolicy = ownAddr.payment.hash();
+
+            // genuine nursery: holds exactly the undistributed markers. A
+            // forged datum cannot pass — markers only exist here and on
+            // hatched leaves (which pin theirs forever).
+            const remaining = N_LEAFS - nextIdx;
+            assert ownInput.resolved.value.amountOf( ownPolicy, LEAF_NFT_NAME ) == remaining;
+
+            const initialChunk = initialChunkBytes();
+            const initialCid = cidV1Raw( initialChunk );
+
+            // marker-bearing outputs at this address, fixed order:
+            // [0] the hatched leaf, [1] the continuing nursery (if any leaf
+            // remains). Marker conservation: 1 + (remaining-1) accounts for
+            // every marker in, so none can leak elsewhere.
+            const ownOuts = tx.outputs.filter( o =>
+                o.address == ownAddr
+                && o.value.amountOf( ownPolicy, LEAF_NFT_NAME ) > 0
+            );
+
+            // bind each output once via head/tail instead of re-indexing
+            // `ownOuts[0]`/`ownOuts[1]` (each index is a fresh dropList walk)
+            const leafOut = ownOuts.head();
+            assert leafOut.value.amountOf( ownPolicy, LEAF_NFT_NAME ) == 1;
+            const InlineDatum{ datum: ld } = leafOut.datum;
+            const LeafNode{ idx: li, rawCid: lc, chunk: lch } = ld as Masterpiece;
+            assert li == nextIdx;
+            assert lc == initialCid;
+            assert lch == initialChunk;
+
+            if( nextIdx < N_LEAFS - 1 ) {
+                assert ownOuts.length() == 2;
+                const nurseryOut = ownOuts.tail().head();
+                assert nurseryOut.value.amountOf( ownPolicy, LEAF_NFT_NAME ) == remaining - 1;
+                const InlineDatum{ datum: nd } = nurseryOut.datum;
+                const Nursery{ nextIdx: nn } = nd as Masterpiece;
+                assert nn == nextIdx + 1;
+            } else {
+                // last hatch: every marker now lives on a leaf
+                assert ownOuts.length() == 1;
+            }
+        }
+    }
+}

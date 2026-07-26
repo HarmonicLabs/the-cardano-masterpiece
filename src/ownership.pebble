@@ -1,0 +1,456 @@
+// ===========================================================================
+//  Ownership — 2D land registry for the 1024x1024 canvas
+// ===========================================================================
+//
+//  Invariant (the whole security argument):
+//
+//    At all times, { Free rects } ∪ { OwnerNft rects } is an EXACT tiling of
+//    the canvas — every pixel covered exactly once.
+//
+//  * `init` mints one Free node covering the whole canvas (trivial tiling).
+//  * `Free.claim` carves an owned rect out of a Free rect, re-tiling the
+//    remainder as ≤4 guillotine-complement Free nodes.
+//  * `split` / `merge` exchange OwnerNfts covering the same area.
+//
+//  Hence a UTxO holding a genuine FREE marker with coords R is an on-chain
+//  proof that no OwnerNft overlaps R: "the pixels are not taken".
+//
+//  OwnerNfts live in user wallets, carry NO datum, and encode their coords in
+//  the asset name as human-readable ASCII — "masterpiece-x0-y0-x1-y1",
+//  canonical decimal, half-open ranges [x0,x1) × [y0,y1) — so wallets and
+//  explorers show the collection and the plot at a glance. Uniqueness by
+//  name follows from the tiling invariant: two tokens with the same name
+//  would double-cover pixels.
+//
+//  NOTE: every action asserts the EXACT tx mint value, so a tx interacting
+//  with this contract cannot mint/burn anything else (any policy). This is
+//  deliberate: it is the cheapest way to rule out smuggled mints without
+//  iterating the mint map.
+
+import {
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT,
+    Coordinates,
+    isValidRect,
+    rectContains,
+    rectArea,
+    isGuillotineCut,
+    rectName
+} from "./lib/rect.pebble";
+
+const FREE_TOKEN_NAME = #; // empty name; only lives on Free nodes at the script
+// the price config NFT: minted once at genesis, lives forever on the single
+// LovelacePerPixel config node. "price" in ascii — never a valid rectName
+// (those are "masterpiece-..."), so it can't collide with a deed.
+const PRICE_NFT_NAME = "price-nft";
+// floor for the owner-set price, so a claim always carries a real payment
+const MIN_LOVELACE_PER_PIXEL = 1_000_000; // >= 1 ADA per pixel
+
+// ---- helpers --------------------------------------------------------------
+
+// exact Value equality. NOT two-sided `contains`: the `valueContains`
+// builtin errors on any negative quantity, and tx.mint carries negatives
+// for burns (claim-whole-rect, split, merge) — see PEBBLE_BUGS.md BUG 18.
+// Builtin Values are canonically normalized (sorted, no zero entries), so
+// comparing their data encodings is a sound order-independent equality
+// that is total on negatives.
+function valueEq( a: Value, b: Value ): boolean {
+    return a.toData() == b.toData();
+}
+
+// `o` carries exactly 1 FREE marker at the script address. The DATUM check
+// happens at the call sites: it must decode through the contract datum union
+// (`as Ownership`), which is only in scope inside contract methods
+// (PEBBLE_BUGS.md BUG 17)
+function isFreeNodeValue( o: TxOut, ownAddr: Address, ownPolicy: bytes ): boolean {
+    return o.address == ownAddr
+        && o.value.amountOf( ownPolicy, FREE_TOKEN_NAME ) == 1;
+}
+
+function sameRect( a: Coordinates, b: Coordinates ): boolean {
+    return a.x0 == b.x0 && a.y0 == b.y0 && a.x1 == b.x1 && a.y1 == b.y1;
+}
+
+// ---- contract -------------------------------------------------------------
+
+contract Ownership {
+
+    param protocolOwner: Address;
+    param genesisUtxo: TxOutRef;
+
+    // one-shot genesis: mint exactly 1 FREE marker, locked at this script
+    // with coords covering the whole canvas
+    mint init(
+        genesisUtxoIdx: int
+    ) {
+        const { tx, policy } = context;
+
+        assert tx.inputs[genesisUtxoIdx].ref == this.genesisUtxo;
+
+        // mint exactly the whole-canvas FREE marker + the single price NFT
+        assert valueEq( tx.mint, tx.mint.scale( 0 )
+            .insert( policy, FREE_TOKEN_NAME, 1 )
+            .insert( policy, PRICE_NFT_NAME, 1 ) );
+
+        const ownAddr = Address.Address{
+            payment: Credential.Script{ hash: policy },
+            stake: undefined
+        };
+
+        const Some{ value: freeOut } =
+            tx.outputs.find( o => o.value.amountOf( policy, FREE_TOKEN_NAME ) == 1 );
+        assert isFreeNodeValue( freeOut, ownAddr, policy );
+        const InlineDatum{ datum: fd } = freeOut.datum;
+        const Free{ coords: fc } = fd as Ownership;
+        assert sameRect( fc, Coordinates.Coordinates{ x0: 0, y0: 0, x1: CANVAS_WIDTH, y1: CANVAS_HEIGHT } );
+
+        // the price config node: the price NFT + an initial lovelace-per-pixel,
+        // locked at this script, ready to be referenced by claims
+        const Some{ value: priceOut } =
+            tx.outputs.find( o => o.value.amountOf( policy, PRICE_NFT_NAME ) == 1 );
+        assert priceOut.address == ownAddr;
+        const InlineDatum{ datum: pd } = priceOut.datum;
+        const LovelacePerPixel{ value: pv } = pd as Ownership;
+        assert pv >= MIN_LOVELACE_PER_PIXEL;
+    }
+
+    // forwarding policy for claims: a genuine Free node is being spent, so
+    // its spend validator — which asserts the exact mint value — is what
+    // really validates this tx
+    mint free() {
+        const { tx, policy } = context;
+
+        const ownAddr = Address.Address{
+            payment: Credential.Script{ hash: policy },
+            stake: undefined
+        };
+
+        assert tx.inputs.some( i =>
+            i.resolved.address == ownAddr
+            && i.resolved.value.amountOf( policy, FREE_TOKEN_NAME ) == 1
+        );
+    }
+
+    // NOTE: no dedicated `split` — a straight two-piece cut is exactly the
+    // one-complement case of `carve`: carve(parent, a) burns parent and mints
+    // a plus its single guillotine complement b, identical to split(parent,
+    // a, b). `carve` (below) subsumes it and also handles 2–4 pieces.
+
+    // burn OwnerNft(a) + OwnerNft(b), mint OwnerNft(a ∪ b); valid iff they
+    // share a full edge (a left of b, or a above b), so the union is a rect.
+    // Both are real tokens (burns), hence valid, hence disjoint by the
+    // tiling invariant.
+    mint merge(
+        a: Coordinates,
+        b: Coordinates
+    ) {
+        const { tx, policy } = context;
+
+        const sideBySide = a.x1 == b.x0 && a.y0 == b.y0 && a.y1 == b.y1;
+        const stacked    = a.y1 == b.y0 && a.x0 == b.x0 && a.x1 == b.x1;
+        assert sideBySide || stacked;
+
+        // in both orientations the union is (a.x0, a.y0, b.x1, b.y1)
+        const union = Coordinates.Coordinates{ x0: a.x0, y0: a.y0, x1: b.x1, y1: b.y1 };
+
+        assert valueEq(
+            tx.mint,
+            tx.mint.scale( 0 )
+                .insert( policy, rectName( a ), -1 )
+                .insert( policy, rectName( b ), -1 )
+                .insert( policy, rectName( union ), 1 )
+        );
+    }
+
+    // burn OwnerNft(parent), mint OwnerNft(target) plus the ≤4 guillotine
+    // complements of target in parent — carve ANY sub-rect out of a deed in
+    // ONE tx (`split` can only make one straight cut per tx: a policy's
+    // mint redeemer runs once). The complements are computed HERE, never
+    // chosen by the caller, in the same fixed order as Free.claim: top,
+    // bottom, left, right.
+    //
+    // Consent is inherent in burning the parent: it must be spent from
+    // wherever it lives — a user wallet, or a SCRIPT (e.g. a marketplace
+    // listing) whose own validator must approve the spend. Deliberately no
+    // signer/holder checks here, so script-held deeds carve exactly like
+    // wallet-held ones.
+    mint carve(
+        parent: Coordinates,
+        target: Coordinates
+    ) {
+        const { tx, policy } = context;
+
+        // parent is a real deed by induction (you cannot burn a token that
+        // does not exist, and only valid rect names ever get minted)
+        assert isValidRect( target );
+        assert rectContains( parent, target );
+
+        let expected = tx.mint.scale( 0 )
+            .insert( policy, rectName( parent ), -1 )
+            .insert( policy, rectName( target ), 1 );
+        let k = 0;
+        if( parent.y0 < target.y0 ) {
+            expected = expected.insert( policy, rectName( Coordinates.Coordinates{ x0: parent.x0, y0: parent.y0, x1: parent.x1, y1: target.y0 } ), 1 );
+            k = k + 1;
+        }
+        if( target.y1 < parent.y1 ) {
+            expected = expected.insert( policy, rectName( Coordinates.Coordinates{ x0: parent.x0, y0: target.y1, x1: parent.x1, y1: parent.y1 } ), 1 );
+            k = k + 1;
+        }
+        if( parent.x0 < target.x0 ) {
+            expected = expected.insert( policy, rectName( Coordinates.Coordinates{ x0: parent.x0, y0: target.y0, x1: target.x0, y1: target.y1 } ), 1 );
+            k = k + 1;
+        }
+        if( target.x1 < parent.x1 ) {
+            expected = expected.insert( policy, rectName( Coordinates.Coordinates{ x0: target.x1, y0: target.y0, x1: parent.x1, y1: target.y1 } ), 1 );
+            k = k + 1;
+        }
+        // target == parent would be a burn+remint of the same name (a
+        // no-op that the exact-mint check below could not even express)
+        assert k >= 1;
+
+        assert valueEq( tx.mint, expected );
+    }
+
+    // unclaimed rectangles, script-locked; authenticated by the FREE marker
+    state Free {
+        coords: Coordinates;
+
+        // mint a new OwnerNft over `claimed` ⊆ this free rect, paying
+        // 5 ADA per pixel to the protocol owner; the remainder of the free
+        // rect continues as its ≤4 guillotine complements
+        spend claim(
+            claimed: Coordinates
+        ) {
+            const { tx, spendingRef, state: { coords } } = context;
+
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            const ownPolicy = ownAddr.payment.hash();
+
+            // the spent node must hold a genuine marker — a datum alone is
+            // forgeable (anyone can pay to the script), the token is not
+            assert ownInput.resolved.value.amountOf( ownPolicy, FREE_TOKEN_NAME ) == 1;
+
+            // exactly one script input: no batching, no double satisfaction
+            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+
+            // "pixels not taken": claimed sits inside witnessed free space
+            assert isValidRect( claimed );
+            assert rectContains( coords, claimed );
+
+            // pay the protocol, at the owner-set price. The price lives on the
+            // LovelacePerPixel config node, proven genuine by its unique NFT (a
+            // counterfeit datum carries no NFT). Referenced, never spent, so any
+            // number of claims can read the same price in parallel.
+            const protocolOwner = this.protocolOwner;
+            const Some{ value: payOut } = tx.outputs.find( o => o.address == protocolOwner );
+            const Some{ value: priceRef } = tx.refInputs.find( i =>
+                i.resolved.value.amountOf( ownPolicy, PRICE_NFT_NAME ) == 1 );
+            const InlineDatum{ datum: prd } = priceRef.resolved.datum;
+            const LovelacePerPixel{ value: pricePerPixel } = prd as Ownership;
+            assert payOut.value.lovelaces() >= rectArea( claimed ) * pricePerPixel;
+
+            // continuing free nodes: exactly the non-empty guillotine
+            // complements of `claimed` in `coords` — computed here, never
+            // chosen by the claimer — in fixed order top, bottom, left, right
+            // head/tail cursor over the filtered outputs — complements come
+            // in fixed order (top, bottom, left, right), so we advance one
+            // step per emitted node instead of re-indexing `freeOuts[k]`
+            // (each `[k]` is a dropList re-traversal). Matches the Aiken port.
+            const freeOuts = tx.outputs.filter( o => o.address == ownAddr );
+            let outs = freeOuts;
+            let k = 0;
+            if( coords.y0 < claimed.y0 ) {
+                const foT = outs.head();
+                assert isFreeNodeValue( foT, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdT } = foT.datum;
+                const Free{ coords: fcT } = fdT as Ownership;
+                assert sameRect( fcT, Coordinates.Coordinates{ x0: coords.x0, y0: coords.y0, x1: coords.x1, y1: claimed.y0 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            if( claimed.y1 < coords.y1 ) {
+                const foB = outs.head();
+                assert isFreeNodeValue( foB, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdB } = foB.datum;
+                const Free{ coords: fcB } = fdB as Ownership;
+                assert sameRect( fcB, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y1, x1: coords.x1, y1: coords.y1 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            if( coords.x0 < claimed.x0 ) {
+                const foL = outs.head();
+                assert isFreeNodeValue( foL, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdL } = foL.datum;
+                const Free{ coords: fcL } = fdL as Ownership;
+                assert sameRect( fcL, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y0, x1: claimed.x0, y1: claimed.y1 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            if( claimed.x1 < coords.x1 ) {
+                const foR = outs.head();
+                assert isFreeNodeValue( foR, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdR } = foR.datum;
+                const Free{ coords: fcR } = fdR as Ownership;
+                assert sameRect( fcR, Coordinates.Coordinates{ x0: claimed.x1, y0: claimed.y0, x1: coords.x1, y1: claimed.y1 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            // no extra script outputs: the cursor must be fully consumed
+            assert freeOuts.length() == k;
+
+            // exact mint: the OwnerNft plus the marker delta (k-1 may be
+            // -1: claiming a whole free rect burns its marker). 1 marker in
+            // + (k-1) minted = k markers, all pinned to the k outputs above,
+            // so none can leak elsewhere.
+            assert valueEq(
+                tx.mint,
+                tx.mint.scale( 0 )
+                    .insert( ownPolicy, rectName( claimed ), 1 )
+                    .insert( ownPolicy, FREE_TOKEN_NAME, k - 1 )
+            );
+        }
+
+        // PROTOCOL-OWNER free claim: the protocol owner carves an OwnerNft
+        // out of free space WITHOUT paying. Gated by the owner's signature;
+        // every value leaving the contract must go to the owner, and the
+        // minted deed must land with the owner (never smuggled into a
+        // continuing free node). Same tiling/mint discipline as `claim`.
+        spend ownerClaim(
+            claimed: Coordinates
+        ) {
+            const { tx, spendingRef, state: { coords } } = context;
+
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            const ownPolicy = ownAddr.payment.hash();
+
+            // genuine marker + single script input (as in `claim`)
+            assert ownInput.resolved.value.amountOf( ownPolicy, FREE_TOKEN_NAME ) == 1;
+            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+
+            // "pixels not taken": claimed sits inside witnessed free space
+            assert isValidRect( claimed );
+            assert rectContains( coords, claimed );
+
+            // the protocol owner (a pub-key address — script creds cannot
+            // sign) must have signed this tx
+            const protocolOwner = this.protocolOwner;
+            const PubKey{ hash: ownerPkh } = protocolOwner.payment;
+            assert tx.requiredSigners.includes( ownerPkh );
+
+            // every output that is not a continuing free node (i.e. leaves
+            // the contract) must go to the protocol owner
+            assert tx.outputs.every( o => o.address == ownAddr || o.address == protocolOwner );
+
+            // ...and the minted deed must actually reach the owner. The
+            // free-node check below only pins each node's marker, so without
+            // this a deed could be locked into a free-node output at the
+            // contract; requiring it in an owner output closes that.
+            const Some{ value: deedOut } = tx.outputs.find( o =>
+                o.address == protocolOwner
+                && o.value.amountOf( ownPolicy, rectName( claimed ) ) == 1
+            );
+
+            // continuing free nodes: the ≤4 guillotine complements of
+            // `claimed` in `coords`, fixed order top/bottom/left/right —
+            // identical to `claim` (head/tail cursor over script outputs)
+            const freeOuts = tx.outputs.filter( o => o.address == ownAddr );
+            let outs = freeOuts;
+            let k = 0;
+            if( coords.y0 < claimed.y0 ) {
+                const foT = outs.head();
+                assert isFreeNodeValue( foT, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdT } = foT.datum;
+                const Free{ coords: fcT } = fdT as Ownership;
+                assert sameRect( fcT, Coordinates.Coordinates{ x0: coords.x0, y0: coords.y0, x1: coords.x1, y1: claimed.y0 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            if( claimed.y1 < coords.y1 ) {
+                const foB = outs.head();
+                assert isFreeNodeValue( foB, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdB } = foB.datum;
+                const Free{ coords: fcB } = fdB as Ownership;
+                assert sameRect( fcB, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y1, x1: coords.x1, y1: coords.y1 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            if( coords.x0 < claimed.x0 ) {
+                const foL = outs.head();
+                assert isFreeNodeValue( foL, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdL } = foL.datum;
+                const Free{ coords: fcL } = fdL as Ownership;
+                assert sameRect( fcL, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y0, x1: claimed.x0, y1: claimed.y1 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            if( claimed.x1 < coords.x1 ) {
+                const foR = outs.head();
+                assert isFreeNodeValue( foR, ownAddr, ownPolicy );
+                const InlineDatum{ datum: fdR } = foR.datum;
+                const Free{ coords: fcR } = fdR as Ownership;
+                assert sameRect( fcR, Coordinates.Coordinates{ x0: claimed.x1, y0: claimed.y0, x1: coords.x1, y1: claimed.y1 } );
+                outs = outs.tail();
+                k = k + 1;
+            }
+            assert freeOuts.length() == k;
+
+            // exact mint — no payment: the deed plus the marker delta,
+            // identical to `claim` (1 marker in + (k-1) minted = k markers,
+            // all pinned to the k free-node outputs)
+            assert valueEq(
+                tx.mint,
+                tx.mint.scale( 0 )
+                    .insert( ownPolicy, rectName( claimed ), 1 )
+                    .insert( ownPolicy, FREE_TOKEN_NAME, k - 1 )
+            );
+        }
+
+        // NOTE: deliberately NO permissionless split of free space — a
+        // free-splitting action would let a griefer fragment free space down
+        // to single pixels for ~1.4 ada per fragment, inflating an honest
+        // claim of that area into hundreds of txs. Free space only fragments
+        // through paid claims (>= 5 ADA to the protocol per tx). Early-launch
+        // contention on the genesis node resolves as claims fragment it.
+    }
+
+    // the price config node (a real second state, so no dummy is needed for
+    // the multi-state datum encoding — cf. PEBBLE_BUGS.md BUG 17). Holds the
+    // price NFT + the current lovelace-per-pixel; claims reference it.
+    state LovelacePerPixel {
+        value: int;
+
+        // only the protocol owner may retune the price. The config node is
+        // re-created at the script with the price NFT preserved and a new,
+        // in-bounds value.
+        spend change() {
+            const { tx, spendingRef } = context;
+
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            const ownPolicy = ownAddr.payment.hash();
+
+            // genuine config node: carries the unique price NFT (a datum alone
+            // is forgeable; the token is not)
+            assert ownInput.resolved.value.amountOf( ownPolicy, PRICE_NFT_NAME ) == 1;
+
+            // only the protocol owner can change the price
+            const PubKey{ hash: ownerPkh } = this.protocolOwner.payment;
+            assert tx.requiredSigners.includes( ownerPkh );
+
+            // exactly one continuing config node at the script, NFT preserved,
+            // new price within bounds. The price NFT is minted only at genesis
+            // and burnable by no redeemer, so it is conserved by this output.
+            const cfgOuts = tx.outputs.filter( o =>
+                o.address == ownAddr
+                && o.value.amountOf( ownPolicy, PRICE_NFT_NAME ) == 1 );
+            assert cfgOuts.length() == 1;
+            const InlineDatum{ datum: pd } = cfgOuts[0].datum;
+            const LovelacePerPixel{ value: newValue } = pd as Ownership;
+            assert newValue >= MIN_LOVELACE_PER_PIXEL;
+        }
+    }
+
+}

@@ -1,0 +1,11 @@
+name = "hlabs/masterpiece"
+version = "0.0.0"
+compiler = "v1.1.19"
+plutus = "v3"
+license = "MIT"
+description = "Aiken reimplementation of The Cardano Masterpiece contracts for benchmark comparison with Pebble"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v2.2.0"
+source = "github"

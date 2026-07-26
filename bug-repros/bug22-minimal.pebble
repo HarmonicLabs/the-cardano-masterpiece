@@ -1,0 +1,24 @@
+// BUG 22 minimal repro — see PEBBLE_BUGS.md.
+// Evaluating method `m` (datum Constr 0 [I 1], redeemer Constr 0 []) with a
+// tx of one input and one output at the same address fails with
+// `unConstrData :: not a data constructor` — the data handed to unConstrData
+// is the output's VALUE map. Removing ANY of these elements makes it pass:
+// the outputs find, the output-value amountOf, or the second (inline) use of
+// `inp.resolved.value`.
+// WORKAROUND: const-bind the values once (`const inValue = inp.resolved.value;`)
+// and reuse the binding (see bug22-workaround note in PEBBLE_BUGS.md).
+contract Iveq4Test {
+    state A {
+        s: int;
+        spend m() {
+            const { tx, spendingRef } = context;
+            const Some{ value: inp } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = inp.resolved.address;
+            assert inp.resolved.value.amountOf( #aa, #bb ) == 0;
+            const Some{ value: out1 } = tx.outputs.find( o => o.address == ownAddr );
+            assert out1.value.amountOf( #aa, #bb ) == 0;
+            assert out1.value.lovelaces() >= inp.resolved.value.lovelaces();
+        }
+    }
+    state B { w: int; }
+}

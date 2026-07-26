@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Cardano Masterpiece — live from the chain</title>
+<style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+        font: 15px/1.5 system-ui, sans-serif;
+        display: flex; flex-direction: column; align-items: center;
+        gap: 1rem; padding: 1.5rem; min-height: 100vh;
+        background: light-dark(#f4f2ec, #16181d);
+        color: light-dark(#232323, #e8e6e0);
+    }
+    h1 { font-size: 1.35rem; font-weight: 650; letter-spacing: .01em; }
+    h1 small { font-weight: 400; opacity: .55; font-size: .8rem; display: block; }
+    .frame {
+        border: 1px solid light-dark(#c8c2b4, #333a45);
+        background: light-dark(#fff, #0d0f13);
+        padding: 10px; border-radius: 6px;
+        box-shadow: 0 6px 30px rgba(0,0,0,.12);
+        max-width: min(92vw, 800px); width: 100%;
+    }
+    canvas {
+        width: 100%; height: auto; display: block;
+        image-rendering: pixelated;
+        background:
+            repeating-conic-gradient(light-dark(#eee,#1c1f26) 0% 25%, transparent 0% 50%)
+            0 0 / 16px 16px;
+    }
+    .stats {
+        display: flex; flex-wrap: wrap; gap: .4rem 1.4rem;
+        font-size: .82rem; opacity: .85; max-width: min(92vw, 800px);
+        justify-content: center;
+    }
+    .stats b { font-weight: 600; }
+    .uri { font-family: ui-monospace, monospace; font-size: .75rem; word-break: break-all; opacity: .7; text-align: center; max-width: min(92vw, 800px); }
+    .err { color: light-dark(#a33, #f88); }
+    footer { font-size: .72rem; opacity: .5; margin-top: auto; text-align: center; }
+</style>
+</head>
+<body>
+<h1>The Cardano Masterpiece
+    <small>1024 × 1024 — reconstructed live from the on-chain leaf UTxOs, no IPFS involved</small>
+</h1>
+
+<div class="frame"><canvas id="cv" width="1024" height="1024"></canvas></div>
+
+<div class="stats" id="stats">loading chain state…</div>
+<div class="uri" id="uri"></div>
+
+<footer id="foot"></footer>
+
+<script>
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const statsEl = document.getElementById("stats");
+const uriEl = document.getElementById("uri");
+const footEl = document.getElementById("foot");
+
+// same palette the on-chain BMP header declares: 256 grayscale entries
+function draw(pixels) {
+    const img = ctx.createImageData(1024, 1024);
+    const d = img.data;
+    for (let i = 0; i < pixels.length; i++) {
+        const v = pixels[i];
+        const o = i * 4;
+        d[o] = v; d[o + 1] = v; d[o + 2] = v; d[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
+async function refresh() {
+    try {
+        const [binRes, stateRes] = await Promise.all([
+            fetch("/canvas.bin"), fetch("/api/state"),
+        ]);
+        if (!binRes.ok || !stateRes.ok) throw new Error("backend error");
+        const pixels = new Uint8Array(await binRes.arrayBuffer());
+        const s = await stateRes.json();
+        draw(pixels);
+        statsEl.classList.remove("err");
+        statsEl.innerHTML =
+            `<span><b>${s.hatchedLeaves.length}</b>/128 leaves on-chain</span>` +
+            `<span><b>${s.unhatched}</b> unhatched (shown white)</span>` +
+            `<span>network <b>${s.network}</b></span>` +
+            `<span>updated <b>${new Date(s.fetchedAt).toLocaleTimeString()}</b></span>`;
+        uriEl.textContent = s.committedImageUri
+            ? `last committed CIP-68 image: ${s.committedImageUri}`
+            : "";
+        footEl.textContent = `script ${s.masterpieceAddress} — policy ${s.masterpiecePolicy}`;
+    } catch (e) {
+        statsEl.classList.add("err");
+        statsEl.textContent = "failed to load chain state: " + e.message;
+    }
+}
+
+refresh();
+setInterval(refresh, 30_000);
+</script>
+</body>
+</html>

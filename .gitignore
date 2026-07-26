@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+.env
+.env.local
+.env.*.local
+.DS_Store
+
+*keys/
+offchain/keys/
+
+# local cardano devnet chain data (huge — never push)
+.devnet/
+.vercel/
