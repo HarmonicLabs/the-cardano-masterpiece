@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 /**
- * A number input that only commits on blur / Enter — so you can type a value
+ * A number input that only commits on blur / Enter so you can type a value
  * freely (including intermediate/empty states) without it snapping on each
  * keystroke. Shared by the Claim and Studio pages for exact coordinate entry.
  */

@@ -15,7 +15,7 @@ const PHASE: Record<string, string> = {
  *    before the next can be signed.
  *
  * `onClose` (if given) renders an × button and auto-dismisses shortly after the
- * batch is done — the caller keeps doing background work (confirm/publish) after
+ * batch is done the caller keeps doing background work (confirm/publish) after
  * the modal is gone.
  */
 export function TxProgress({ p, onClose }: { p: SignProgress | null; onClose?: () => void }) {
@@ -43,7 +43,7 @@ export function TxProgress({ p, onClose }: { p: SignProgress | null; onClose?: (
                 <h3>{phase === "done" ? "Done" : "Signing transactions"}</h3>
 
                 {bulk && current === 0 ? (
-                    <p className="muted">Approve <b>{total}</b> transactions in your wallet — a single prompt.</p>
+                    <p className="muted">Approve <b>{total}</b> transactions in your wallet.</p>
                 ) : (
                     <p className="muted">
                         Transaction <b>{Math.max(1, current)}</b> of <b>{total}</b> — {PHASE[phase]}
@@ -52,8 +52,8 @@ export function TxProgress({ p, onClose }: { p: SignProgress | null; onClose?: (
 
                 {!bulk && total > 1 && phase !== "done" && (
                     <p className="muted small">
-                        Your wallet signs one transaction at a time, so each must confirm on-chain before the next —
-                        this takes a bit. A wallet with batch signing (e.g. Eternl) does it in one prompt.
+                        Your wallet signs one transaction at a time, so each must confirm on-chain before the next.
+                        This can take a bit. A wallet with CIP-103 support (e.g. Eternl) does it in one prompt.
                     </p>
                 )}
 

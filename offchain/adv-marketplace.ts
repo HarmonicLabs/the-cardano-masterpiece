@@ -12,7 +12,7 @@
 //
 //  Run (devnet up):  npx tsx adv-marketplace.ts
 // ===========================================================================
-import { Value, Hash28, dataToCbor, type Data, type UTxO, type ITxBuildArgs } from "@harmoniclabs/buildooor";
+import { Address, Credential, StakeCredentials, Value, Hash28, dataToCbor, type Data, type UTxO, type ITxBuildArgs } from "@harmoniclabs/buildooor";
 import {
     ensureWallet, fundFromGenesis, queryUtxos, awaitTxAtAddr, signSubmitAwait,
     sortedRefIndex, findUtxoWithAsset, pureAdaUtxo, txBuilder, submitSignedTx, type Wallet,
@@ -287,6 +287,28 @@ step("5. REQUEST / FILL — buyer requests C; deliver-cheats must fail");
     };
     await post("request-C-1");
     await post("request-C-2");
+
+    // a THIRD request for C parked at the SAME marketplace payment credential but
+    // a DIFFERENT stake credential — the stake-cred double-satisfaction primitive.
+    // Before the fix, `fill`'s "exactly one own input" counter compared the FULL
+    // address, so this order wouldn't be counted alongside a normal one, letting
+    // one deed close two requests. The counter now compares payment creds.
+    const marketStakedAddr = Address.testnet(
+        Credential.script(new Hash28(market.policyHex)),
+        StakeCredentials.keyHash(buyer.pkh),
+    );
+    {
+        const bu = queryUtxos(buyer.address);
+        const bColl = bu.find((u) => u.resolved.value.lovelaces === ADA(10))!;
+        const bFunds = pureAdaUtxo(bu.filter(notRef(bColl)), ADA(35))!;
+        await signSubmitAwait({
+            inputs: [bFunds],
+            outputs: [{ address: marketStakedAddr, value: Value.lovelaces(ADA(30)), datum: requestDatum(buyer.address, C) }],
+            changeAddress: buyer.address,
+        }, buyer, "request-C-staked", marketStakedAddr);
+    }
+    const stakedReqForC = (): UTxO => queryUtxos(marketStakedAddr)
+        .find((u) => u.resolved.value.lovelaces === ADA(30))!;
     const requestsForC = (): UTxO[] => queryUtxos(market.address).filter((u) =>
         u.resolved.value.lovelaces === ADA(30) && !findUtxoWithAsset([u], own.policyHex, rectName(C)));
     assert(requestsForC().length === 2, "two open requests for C");
@@ -335,6 +357,26 @@ step("5. REQUEST / FILL — buyer requests C; deliver-cheats must fail");
             ],
             collaterals: [sColl],
             outputs: [{ address: buyer.address, value: withAda(ADA(2), deed(C, 1n)) }], // only ONE deed for TWO requests
+            changeAddress: seller.address,
+        };
+    }, seller);
+
+    // C') STAKE-CRED DOUBLE-SATISFACTION: one request at market.address + one at
+    // the same payment cred with a DIFFERENT stake cred, closed by ONE deed. The
+    // pre-fix full-address counter would have let this through; the payment-cred
+    // counter counts both requests as ours and rejects.
+    await expectReject("double-satisfaction fill across mismatched stake creds (2 requests, 1 deed)", async () => {
+        const rNorm = requestsForC()[0];
+        const rStaked = stakedReqForC();
+        const deedC = deedCU();
+        return {
+            inputs: [
+                { utxo: rNorm, referenceScript: { refUtxo: refK, datum: "inline", redeemer: mFill() } },
+                { utxo: rStaked, referenceScript: { refUtxo: refK, datum: "inline", redeemer: mFill() } },
+                deedC, sfunds(ADA(5)),
+            ],
+            collaterals: [sColl],
+            outputs: [{ address: buyer.address, value: withAda(ADA(2), deed(C, 1n)) }], // ONE deed for TWO requests
             changeAddress: seller.address,
         };
     }, seller);

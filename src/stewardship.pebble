@@ -44,7 +44,7 @@ const FREE_TOKEN_NAME = #; // empty name; only lives on Free nodes at the script
 // (those are "masterpiece-..."), so it can't collide with a deed.
 const PRICE_NFT_NAME = "price-nft";
 // floor for the steward-set price, so a claim always carries a real payment
-const MIN_LOVELACE_PER_PIXEL = 1_000_000; // >= 1 ADA per pixel
+const MIN_LOVELACE_PER_PIXEL = 500_000; // >= 0.5 ADA per pixel
 
 // ---- helpers --------------------------------------------------------------
 
@@ -88,7 +88,7 @@ contract Stewardship {
         assert tx.inputs[genesisUtxoIdx].ref == this.genesisUtxo;
 
         // mint exactly the whole-canvas FREE marker + the single price NFT
-        assert valueEq( tx.mint, tx.mint.scale( 0 )
+        assert valueEq( tx.mint, std.value.zero
             .insert( policy, FREE_TOKEN_NAME, 1 )
             .insert( policy, PRICE_NFT_NAME, 1 ) );
 
@@ -155,7 +155,7 @@ contract Stewardship {
 
         assert valueEq(
             tx.mint,
-            tx.mint.scale( 0 )
+            std.value.zero
                 .insert( policy, rectName( a ), -1 )
                 .insert( policy, rectName( b ), -1 )
                 .insert( policy, rectName( union ), 1 )
@@ -185,7 +185,7 @@ contract Stewardship {
         assert isValidRect( target );
         assert rectContains( parent, target );
 
-        let expected = tx.mint.scale( 0 )
+        let expected = std.value.zero
             .insert( policy, rectName( parent ), -1 )
             .insert( policy, rectName( target ), 1 );
         let k = 0;
@@ -233,7 +233,8 @@ contract Stewardship {
             assert ownInput.resolved.value.amountOf( ownPolicy, FREE_TOKEN_NAME ) == 1;
 
             // exactly one script input: no batching, no double satisfaction
-            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+            const ownPaymentCreds = ownAddr.payment;
+            assert tx.inputs.filter( i => i.resolved.address.payment == ownPaymentCreds ).length() == 1;
 
             // "pixels not taken": claimed sits inside witnessed free space
             assert isValidRect( claimed );
@@ -306,7 +307,7 @@ contract Stewardship {
             // so none can leak elsewhere.
             assert valueEq(
                 tx.mint,
-                tx.mint.scale( 0 )
+                std.value.zero
                     .insert( ownPolicy, rectName( claimed ), 1 )
                     .insert( ownPolicy, FREE_TOKEN_NAME, k - 1 )
             );
@@ -328,7 +329,8 @@ contract Stewardship {
 
             // genuine marker + single script input (as in `claim`)
             assert ownInput.resolved.value.amountOf( ownPolicy, FREE_TOKEN_NAME ) == 1;
-            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+            const ownPaymentCreds = ownAddr.payment;
+            assert tx.inputs.filter( i => i.resolved.address.payment == ownPaymentCreds ).length() == 1;
 
             // "pixels not taken": claimed sits inside witnessed free space
             assert isValidRect( claimed );
@@ -402,7 +404,7 @@ contract Stewardship {
             // all pinned to the k free-node outputs)
             assert valueEq(
                 tx.mint,
-                tx.mint.scale( 0 )
+                std.value.zero
                     .insert( ownPolicy, rectName( claimed ), 1 )
                     .insert( ownPolicy, FREE_TOKEN_NAME, k - 1 )
             );

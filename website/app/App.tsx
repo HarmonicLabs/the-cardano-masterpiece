@@ -30,7 +30,7 @@ export function App() {
                 </Routes>
             </main>
             <footer>
-                <span>every pixel served straight from preprod utxos — ipfs not involved</span>
+                <span>The image is stored fully onchain and replicated on IPFS</span>
                 <a href="https://github.com/HarmonicLabs/the-cardano-masterpiece"
                    target="_blank" rel="noreferrer">source on GitHub ↗</a>
             </footer>

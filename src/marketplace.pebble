@@ -58,10 +58,14 @@ contract Marketplace {
             const { tx, spendingRef, state: { seller, pricePerPixel } } = context;
 
             // exactly one marketplace input: a tx cannot take two orders
-            // against a single payment
+            // against a single payment. Count by PAYMENT credential: a listing
+            // deposited with the same script payment cred but a DIFFERENT stake
+            // cred is still one of ours — comparing the full Address would miss
+            // it and let two orders share one payment (double satisfaction).
             const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
             const ownAddr = ownInput.resolved.address;
-            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+            const ownPaymentCreds = ownAddr.payment;
+            assert tx.inputs.filter( i => i.resolved.address.payment == ownPaymentCreds ).length() == 1;
 
             assert ownInput.resolved.value.amountOf( this.collectionPolicy, rectName( rect ) ) == 1;
 
@@ -99,7 +103,8 @@ contract Marketplace {
             // exactly one marketplace input (as in `buy`)
             const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
             const ownAddr = ownInput.resolved.address;
-            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+            const ownPaymentCreds = ownAddr.payment;
+            assert tx.inputs.filter( i => i.resolved.address.payment == ownPaymentCreds ).length() == 1;
 
             const ownPolicy = this.collectionPolicy;
             assert ownInput.resolved.value.amountOf( ownPolicy, rectName( parent ) ) == 1;
@@ -177,7 +182,8 @@ contract Marketplace {
             // two identical requests
             const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
             const ownAddr = ownInput.resolved.address;
-            assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
+            const ownPaymentCreds = ownAddr.payment;
+            assert tx.inputs.filter( i => i.resolved.address.payment == ownPaymentCreds ).length() == 1;
 
             // the requested deed reaches the requester. Deed names are
             // unique (stewardship tiling invariant), so this output cannot

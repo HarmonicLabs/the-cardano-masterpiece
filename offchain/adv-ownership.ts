@@ -282,7 +282,7 @@ step("4. CHANGE (price) adversarial attempts");
     };
 
     await expectReject("price change without the steward's signature", () => changeArgs({ sign: undefined }), mallory);
-    await expectReject("price change below the 1-ADA floor", () => changeArgs({ sign: steward, value: MIN_LOVELACE_PER_PIXEL - 1n }), steward);
+    await expectReject("price change below the 0.5-ADA floor", () => changeArgs({ sign: steward, value: MIN_LOVELACE_PER_PIXEL - 1n }), steward);
     await expectReject("price change that removes the price NFT from the config node", () => changeArgs({ sign: steward, keepNft: false, nftTo: steward }), steward);
 
     await signSubmitAwait(changeArgs({ sign: steward, value: newPrice }), steward, "honest-change", own.address);

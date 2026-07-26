@@ -34,7 +34,7 @@ export function Landing() {
                 <h2>The Canvas</h2>
                 <p className="tagline">
                     1008 × 1008 collaborative pixels, reconstructed live from the
-                    on-chain leaf UTxOs — no IPFS involved.
+                    on-chain UTxOs
                 </p>
             </div>
             <div className="frame"><CanvasBoard pixels={pixels} /></div>

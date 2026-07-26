@@ -19,8 +19,8 @@ export const LINE_LENGTH = 1008;   // canvas width (bytes per row)
 export const CANVAS_HEIGHT = 1008;
 export const ROWS_PER_LEAF = 12;
 export const CHUNK_SIZE = LINE_LENGTH * ROWS_PER_LEAF; // 12096
-export const LOVELACE_PER_PIXEL = 3_000_000n;      // default/initial price at genesis
-export const MIN_LOVELACE_PER_PIXEL = 1_000_000n;  // contract floor (>= 1 ADA/px)
+export const LOVELACE_PER_PIXEL = 2_500_000n;      // default/initial price at genesis (mainnet launch)
+export const MIN_LOVELACE_PER_PIXEL = 500_000n;    // contract floor (>= 0.5 ADA/px) — MUST match stewardship.pebble
 
 const ascii = (s: string): Uint8Array => new TextEncoder().encode(s);
 

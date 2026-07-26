@@ -20,7 +20,7 @@
 import "./_env.js";   // MUST be first: loads .env.local into process.env for local dev
 import {
     Address, Value, Hash28, Tx, TxBuilder, TxWitnessSet, UTxO, TxOutRef,
-    DataConstr, DataB, DataI, DataList, defaultPreprodGenesisInfos,
+    DataConstr, DataB, DataI, DataList, defaultPreprodGenesisInfos, defaultMainnetGenesisInfos,
     type Data, type ITxBuildArgs,
 } from "@harmoniclabs/buildooor";
 import { BlockfrostPluts } from "@harmoniclabs/blockfrost-pluts";
@@ -54,7 +54,8 @@ const LINE_LENGTH = 1008;        // canvas width (row stride)
 const CANVAS_HEIGHT = 1008;      // 84 leaves x 12 rows
 const CHUNK_SIZE = 12096;        // 12 rows x 1008
 const ROWS_PER_LEAF = 12;
-export const LOVELACE_PER_PIXEL = 3_000_000n;   // genesis/fallback default (live price read from chain)
+const IS_MAINNET = config.network === "mainnet";
+export const LOVELACE_PER_PIXEL = 2_500_000n;   // genesis/fallback default (live price read from chain)
 const ROOT_REF_NFT_NAME_HEX = "000643b06d61737465727069656365"; // (100)masterpiece
 const EMPTY_NAME = new Uint8Array(0);
 
@@ -134,7 +135,7 @@ export function parseAddress(s: string): Address {
 let _txb: TxBuilder | undefined;
 async function txBuilder(): Promise<TxBuilder> {
     if (_txb) return _txb;
-    _txb = new TxBuilder(await api.getProtocolParameters(), defaultPreprodGenesisInfos);
+    _txb = new TxBuilder(await api.getProtocolParameters(), IS_MAINNET ? defaultMainnetGenesisInfos : defaultPreprodGenesisInfos);
     return _txb;
 }
 
@@ -195,7 +196,7 @@ const txOutRefTag = (ref: TxOutRef): DataConstr => new DataConstr(0, [
 
 // plutus Address data -> buildooor Address
 const addressFromData = (d: unknown): Address =>
-    Address.fromData(d as Parameters<typeof Address.fromData>[0], "testnet");
+    Address.fromData(d as Parameters<typeof Address.fromData>[0], IS_MAINNET ? "mainnet" : "testnet");
 
 // guillotine complements of `target` in `parent` — mirrors stewardship `carve`
 // (fixed order top, bottom, left, right)

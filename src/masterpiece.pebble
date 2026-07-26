@@ -110,7 +110,7 @@ contract Masterpiece {
         // exact mint. Values are canonically normalized, so data equality is
         // order-independent — and unlike two-sided `contains` it stays total
         // if the mint ever carries negatives (PEBBLE_BUGS.md BUG 18)
-        const expectedMint = tx.mint.scale( 0 )
+        const expectedMint = std.value.zero
             .insert( policy, LEAF_NFT_NAME, N_LEAFS )
             .insert( policy, ROOT_REF_NFT_NAME, 1 )
             .insert( policy, ROOT_USER_NFT_NAME, 1 );

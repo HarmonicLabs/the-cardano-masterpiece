@@ -8,7 +8,7 @@
 // ===========================================================================
 import {
     Address, Value, Hash28, TxBuilder, UTxO, TxOutRef,
-    DataConstr, DataB, DataI, DataList, defaultPreprodGenesisInfos,
+    DataConstr, DataB, DataI, DataList, defaultPreprodGenesisInfos, defaultMainnetGenesisInfos,
 } from "@harmoniclabs/buildooor";
 import { BlockfrostPluts } from "@harmoniclabs/blockfrost-pluts";
 import { sha2_256_sync } from "@harmoniclabs/crypto";
@@ -23,7 +23,10 @@ export const CANVAS_H = 1008;       // canvas height (84 leaves x 12 rows)
 export const CANVAS = CANVAS_W;     // alias: row stride, used in edit chunk math
 export const ROWS_PER_LEAF = 12;
 export const N_LEAFS = 84;
-export const LOVELACE_PER_PIXEL = 3_000_000n;   // genesis/fallback default (live price read from chain)
+// network switch: mainnet launch economics vs preprod testing values
+export const IS_MAINNET = config.network === "mainnet";
+export const NETWORK_TAG: "mainnet" | "testnet" = IS_MAINNET ? "mainnet" : "testnet";
+export const LOVELACE_PER_PIXEL = 2_500_000n;   // genesis/fallback default (live price read from chain)
 export const MIN_LISTING_LOVELACE = 2_000_000n;
 
 /** true if the given wallet address is the protocol steward (payment-cred match,
@@ -53,13 +56,13 @@ const asciiBytes = (s: string): Uint8Array => new TextEncoder().encode(s);
 // the /bf proxy is reachable either way.
 export const bf = new BlockfrostPluts({
     customBackend: `${globalThis.location.origin}/bf`,
-    network: "preprod",
+    network: config.network as "mainnet" | "preprod" | "preview",
 });
 
 let _txb: TxBuilder | undefined;
 export async function txBuilder(): Promise<TxBuilder> {
     if (_txb) return _txb;
-    _txb = new TxBuilder(await bf.getProtocolParameters(), defaultPreprodGenesisInfos);
+    _txb = new TxBuilder(await bf.getProtocolParameters(), IS_MAINNET ? defaultMainnetGenesisInfos : defaultPreprodGenesisInfos);
     return _txb;
 }
 
@@ -180,7 +183,7 @@ export const oStewardClaim = (rect: Rect): DataConstr => new DataConstr(1, [rect
 // LovelacePerPixel state (datum Constr 1): the steward-set price + its change redeemer
 export const PRICE_NFT_NAME = asciiBytes("price-nft");
 export const PRICE_NFT_NAME_HEX = bytesToHex(PRICE_NFT_NAME);
-export const MIN_LOVELACE_PER_PIXEL = 1_000_000n;
+export const MIN_LOVELACE_PER_PIXEL = 500_000n;   // contract floor (0.5 ADA/px) — matches stewardship.pebble
 export const lovelacePerPixelDatum = (value: bigint): DataConstr => new DataConstr(1, [new DataI(value)]);
 export const oPriceChange = (): DataConstr => new DataConstr(0, []);
 export const oMintFree = (): DataConstr => new DataConstr(1, []);

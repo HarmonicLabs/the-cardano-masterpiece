@@ -53,16 +53,6 @@ async function resolveBulkSigner(api: WalletApi, walletName?: string): Promise<S
     }
 }
 
-// ---- progress reporting (drives the signing modal) -------------------------
-export type SignPhase = "signing" | "submitting" | "confirming" | "done";
-export interface SignProgress {
-    total: number;      // number of transactions in the batch
-    current: number;    // 1-based index being processed (0 = bulk sign, whole batch)
-    phase: SignPhase;
-    bulk: boolean;      // true = one wallet prompt (CIP-103), false = one prompt per tx
-    hashes: string[];   // submitted so far, in order
-}
-
 /** poll the same-origin /bf proxy until the tx lands in a block (or time out) */
 async function waitConfirmed(hash: string, timeoutMs = 180_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
@@ -73,16 +63,35 @@ async function waitConfirmed(hash: string, timeoutMs = 180_000): Promise<void> {
     throw new Error(`timed out waiting for transaction ${hash.slice(0, 12)}… to confirm`);
 }
 
+// A wallet that can't yet see the previous (parent) tx's mempool output rejects
+// signing its child with this message — it doesn't recognize the chained input
+// as its own. It's a propagation race, not a real failure: retry once the parent
+// is settled on-chain.
+const isMissingInputKeyError = (e: unknown): boolean =>
+    /secret key associated with any of the inputs/i.test(
+        String((e as { info?: string; message?: string })?.info ?? (e as Error)?.message ?? e),
+    );
+
+// ---- progress reporting (drives the signing modal) -------------------------
+export type SignPhase = "signing" | "submitting" | "confirming" | "done";
+export interface SignProgress {
+    total: number;      // number of transactions in the batch
+    current: number;    // 1-based index being processed (0 = bulk sign, whole batch)
+    phase: SignPhase;
+    bulk: boolean;      // true = one wallet prompt (CIP-103), false = one prompt per tx
+    hashes: string[];   // submitted so far, in order
+}
+
 /**
  * Sign + submit a BATCH of txs (chained — each tx spends the previous one's
  * outputs), reporting progress through `onProgress`.
  *
  *  • Wallet with CIP-103 `signTxs`  → ONE prompt for the whole chain, then
  *    submit in order (fast).
- *  • Wallet without it              → fall back to ONE prompt per tx, and wait
- *    for each to CONFIRM on-chain before signing the next (a per-tx `signTx`
- *    can't resolve the previous tx's not-yet-on-chain inputs). Slower, but works
- *    with any CIP-30 wallet; the modal shows the per-tx progress.
+ *  • Wallet without it              → ONE prompt per tx, signed+submitted
+ *    back-to-back in order WITHOUT waiting for confirmation: each tx spends the
+ *    previous tx's mempool change, so the wallet signs the next against the
+ *    pending output. Works with any CIP-30 wallet; the modal shows per-tx progress.
  */
 export async function signAndSubmitAll(
     api: WalletApi,
@@ -121,17 +130,33 @@ export async function signAndSubmitAll(
         return hashes;
     }
 
-    // fallback: one prompt per tx, confirming between chained txs
+    // fallback: one prompt per tx, WITHOUT waiting for on-chain confirmation.
+    // The txs are chained (each spends the previous tx's predicted change), so we
+    // sign+submit back-to-back IN ORDER: tx[i+1] references tx[i]'s mempool output
+    // and the wallet signs it against that pending change — no need to wait ~30s
+    // per tx for a block. (NOT chaining would make tx[i+1] reference a wallet utxo
+    // already spent by tx[i] in the mempool, and the wallet then reports "does not
+    // have the secret key associated with any of the inputs and certificates".)
     for (let i = 0; i < total; i++) {
         report(i + 1, "signing", false);
-        const witnesses = await api.signTx(txs[i], true);
+        let witnesses: string;
+        try {
+            witnesses = await api.signTx(txs[i], true);
+        } catch (e) {
+            // wallet couldn't resolve the parent's not-yet-visible mempool change:
+            // wait for the parent to settle on-chain, give it a few seconds to
+            // reach the wallet, then retry the signature once.
+            const parent = hashes[i - 1];
+            if (!isMissingInputKeyError(e) || !parent) throw e;
+            report(i + 1, "confirming", false);
+            await waitConfirmed(parent);
+            await new Promise((r) => setTimeout(r, 5000));
+            report(i + 1, "signing", false);
+            witnesses = await api.signTx(txs[i], true);
+        }
         report(i + 1, "submitting", false);
         const { hash } = await submitTx(txs[i], witnesses);
         hashes.push(hash);
-        if (i < total - 1) {
-            report(i + 1, "confirming", false);   // let the next tx's inputs land on-chain
-            await waitConfirmed(hash);
-        }
     }
     report(total, "done", false);
     return hashes;

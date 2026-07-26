@@ -17,7 +17,7 @@ import {
     freeDatum, listingDatum, requestDatum, txOutRefTag, lovelacePerPixelDatum,
     oClaim, oStewardClaim, oMintFree, oMintCarve, oMintMerge, oPriceChange,
     mBuy, mPartialBuy, mListingCancel, mFill, mRequestCancel,
-    asConstr, type FreeNode,
+    asConstr, NETWORK_TAG, type FreeNode,
 } from "./chain.js";
 import { deedCip25 } from "./deedImage.js";
 import type { PlacedSprite } from "./pixelify.js";
@@ -202,7 +202,7 @@ export async function buildClaimTxs(
  */
 export async function buildSetPriceTx(api: WalletApi, address: string, newPricePerPixel: bigint): Promise<string> {
     if (!isProtocolSteward(address)) throw new Error("only the protocol steward can change the price");
-    if (newPricePerPixel < MIN_LOVELACE_PER_PIXEL) throw new Error("price must be at least 1 ADA per pixel");
+    if (newPricePerPixel < MIN_LOVELACE_PER_PIXEL) throw new Error(`price must be at least ${Number(MIN_LOVELACE_PER_PIXEL) / 1_000_000} ADA per pixel`);
     const userAddr = Address.fromString(address);
     const stewardAddr = Address.fromString(config.protocolStewardAddress);
     const { utxo: cfg } = await priceConfig();
@@ -359,7 +359,7 @@ export async function buildMarketCancelTxs(api: WalletApi, address: string, utxo
     for (const ref of utxoRefs) {
         const orderU = await marketUtxo(ref);
         const d = asConstr(orderU.resolved.datum);
-        const steward = Address.fromData(d.fields[0] as Parameters<typeof Address.fromData>[0], "testnet");
+        const steward = Address.fromData(d.fields[0] as Parameters<typeof Address.fromData>[0], NETWORK_TAG);
         if (steward.paymentCreds.hash.toString() !== userAddr.paymentCreds.hash.toString())
             throw new Error("only the order's steward can cancel it");
         const redeemer = Number(d.constr) === 0 ? mListingCancel() : mRequestCancel();
@@ -581,7 +581,7 @@ export async function buildMarketCancelTx(api: WalletApi, address: string, utxoR
     const userAddr = Address.fromString(address);
     const orderU = await marketUtxo(utxoRef);
     const d = asConstr(orderU.resolved.datum);
-    const steward = Address.fromData(d.fields[0] as Parameters<typeof Address.fromData>[0], "testnet");
+    const steward = Address.fromData(d.fields[0] as Parameters<typeof Address.fromData>[0], NETWORK_TAG);
     if (steward.paymentCreds.hash.toString() !== userAddr.paymentCreds.hash.toString())
         throw new Error("only the order's steward can cancel it");
     const redeemer = Number(d.constr) === 0 ? mListingCancel() : mRequestCancel();

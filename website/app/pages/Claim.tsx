@@ -7,7 +7,7 @@ import {
     type CanvasStateInfo, type FreeArea, type MarketListing, type Rect,
 } from "../lib/api.ts";
 import { buildAcquireTxs, buildSetPriceTx } from "../lib/txbuild.ts";
-import { CANVAS_W as W, CANVAS_H as H, isProtocolSteward } from "../lib/chain.ts";
+import { CANVAS_W as W, CANVAS_H as H, isProtocolSteward, MIN_LOVELACE_PER_PIXEL } from "../lib/chain.ts";
 import { signAndSubmit, signAndSubmitAll, hasBulkSigner, type SignProgress } from "../lib/sign.ts";
 import { TxProgress } from "../components/TxProgress.tsx";
 import {
@@ -46,7 +46,8 @@ export function Claim() {
     async function setPrice() {
         if (!api || !address) return;
         const ada = Number(newPriceAda);
-        if (!Number.isFinite(ada) || ada < 1) { setError("price must be at least 1 ₳ per pixel"); return; }
+        const minAda = Number(MIN_LOVELACE_PER_PIXEL) / 1_000_000;
+        if (!Number.isFinite(ada) || ada < minAda) { setError(`price must be at least ${minAda} ₳ per pixel`); return; }
         setError(null); setResult(null);
         try {
             setBusy("updating price…");
