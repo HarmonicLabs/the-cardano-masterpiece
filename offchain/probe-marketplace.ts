@@ -6,7 +6,7 @@
 //  Only the protocol parameters come from the network.
 //
 //  The partial-buy scenarios COMPOSE two real validators in one tx: the
-//  marketplace spend AND the ownership `split` mint (probe-local ownership
+//  marketplace spend AND the stewardship `split` mint (probe-local stewardship
 //  instance, so the deed policy is genuinely enforceable here).
 // ===========================================================================
 import {
@@ -19,7 +19,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert";
 import {
-    ownershipContract, marketplaceContract, listingDatum, requestDatum,
+    stewardshipContract, marketplaceContract, listingDatum, requestDatum,
     mBuy, mPartialBuy, mListingCancel, mFill, mRequestCancel, mRecover, oMintCarve, carveComplements,
     rectName, txOutRefData, type Rect,
 } from "./contracts.ts";
@@ -41,11 +41,11 @@ const requester = addrOf(key(9));
 const requesterPkh = key(9).derivePublicKey().hash;
 
 // ---- contracts ------------------------------------------------------------
-// probe-local ownership instance: its `split` mint really runs in the
+// probe-local stewardship instance: its `split` mint really runs in the
 // partial-buy txs below, enforcing cut geometry + exact mint
-const own = ownershipContract(addrOf(key(10)), new TxOutRef({ id: "00".repeat(32), index: 0 }));
+const own = stewardshipContract(addrOf(key(10)), new TxOutRef({ id: "00".repeat(32), index: 0 }));
 const market = marketplaceContract(hexToBytes(own.policyHex));
-console.log("ownership policy  :", own.policyHex);
+console.log("stewardship policy  :", own.policyHex);
 console.log("marketplace policy:", market.policyHex);
 
 const deedRect: Rect = { x0: 10, y0: 10, x1: 20, y1: 20 }; // 100 px
@@ -223,7 +223,7 @@ await expectFail("Listing.partialBuy underpaying the bought area", partialArgs({
         { address: buyer, value: Value.add(Value.lovelaces(ADA(2)), deed(inner, 1n)) },
     ],
 }));
-await expectFail("Listing.partialBuy carving a rect outside the parent (ownership rejects)", (() => {
+await expectFail("Listing.partialBuy carving a rect outside the parent (stewardship rejects)", (() => {
     const outside: Rect = { x0: 15, y0: 15, x1: 25, y1: 25 };
     return partialArgs({
         inputs: [
@@ -241,7 +241,7 @@ await expectFail("Listing.partialBuy carving a rect outside the parent (ownershi
         ],
     });
 })());
-await expectFail("Listing.partialBuy carving the whole parent (ownership rejects, k=0)", partialArgs({
+await expectFail("Listing.partialBuy carving the whole parent (stewardship rejects, k=0)", partialArgs({
     inputs: [
         { utxo: listingU, referenceScript: { refUtxo: refK, datum: "inline", redeemer: mPartialBuy(deedRect, deedRect) } },
         buyerFunds,
@@ -256,10 +256,10 @@ await expectFail("Listing.partialBuy carving the whole parent (ownership rejects
     ],
 }));
 
-// ---- ownership carve standalone (wallet-held deed, no marketplace) --------
+// ---- stewardship carve standalone (wallet-held deed, no marketplace) --------
 const walletDeed = u(buyer, Value.add(Value.lovelaces(ADA(2)), deed(deedRect, 1n)));
 const corner: Rect = { x0: 10, y0: 10, x1: 15, y1: 15 };
-await expectOk("ownership.carve on a wallet-held deed (2 complements)", {
+await expectOk("stewardship.carve on a wallet-held deed (2 complements)", {
     inputs: [walletDeed, buyerFunds],
     collaterals: [buyerColl],
     mints: [{

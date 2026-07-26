@@ -3,7 +3,7 @@
 import { Value, Hash28 } from "@harmoniclabs/buildooor";
 import { queryUtxos, ensureWallet, fundFromGenesis, awaitTxAtAddr, txBuilder, sortedRefIndex } from "./lib.ts";
 import {
-    ownershipContract, masterpieceContract, buildBmpHeader, rootDatum, nurseryDatum,
+    stewardshipContract, masterpieceContract, buildBmpHeader, rootDatum, nurseryDatum,
     initialChunk, mpMintInit, LEAF_NFT_NAME, ROOT_REF_NFT_NAME, ROOT_USER_NFT_NAME, N_LEAFS,
 } from "./contracts.ts";
 import { cidV1Raw } from "./cid.ts";
@@ -19,8 +19,8 @@ const collateral = utxos.find(u => u.resolved.value.lovelaces === 10_000_000n)!;
 const funds = utxos.find(u => u.resolved.value.lovelaces === 500_000_000n)!;
 
 const bmpHeader = buildBmpHeader();
-const ownership = ownershipContract(w.address, funds.utxoRef); // dummy, just for the hash
-const mp = masterpieceContract(ownership.hash.toBuffer(), funds.utxoRef, bmpHeader);
+const stewardship = stewardshipContract(w.address, funds.utxoRef); // dummy, just for the hash
+const mp = masterpieceContract(stewardship.hash.toBuffer(), funds.utxoRef, bmpHeader);
 const initCid = cidV1Raw(initialChunk());
 const rootD = rootDatum(Array.from({ length: N_LEAFS }, () => initCid), bmpHeader);
 const extra = utxos.find(u => u.resolved.value.lovelaces !== 10_000_000n && u !== funds) ?? collateral;

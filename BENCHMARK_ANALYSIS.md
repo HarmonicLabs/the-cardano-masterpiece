@@ -7,7 +7,7 @@ re-runnable) and read the pretty-printed terms side by side
 
 ## Structural counts (static occurrences in the compiled AST)
 
-| metric      | mktpl P | mktpl A | owner P | owner A | mstr P | mstr A |
+| metric      | mktpl P | mktpl A | steward P | steward A | mstr P | mstr A |
 |-------------|--------:|--------:|--------:|--------:|-------:|-------:|
 | total nodes |   4,923 |   3,439 |   6,714 |   4,463 |  9,555 |  5,292 |
 | applications|   1,539 |     963 |   2,024 |   1,443 |  3,050 |  1,642 |
@@ -169,7 +169,7 @@ peephole (`eliminateDataRoundTripsAndReturnRoot`, 3 sweep points) rewrites
 only the always-safe decode-after-encode direction, resolving builtin heads
 through the lexical environment (pre-forced builtins are variables by the
 time adjacencies form). Validated: full suite + full devnet e2e green.
-Sizes: ownership 6768→6737, masterpiece 10895→10772, marketplace 4899→4833;
+Sizes: stewardship 6768→6737, masterpiece 10895→10772, marketplace 4899→4833;
 CPU deltas small (hatch 1.12→1.11B) — the peephole is the small half; the
 big half is the decode-once sharing below.
 
@@ -207,7 +207,7 @@ can resurrect dead bindings into eager evaluation.
 | masterpiece init CPU | 2.26B | **1.39B** | 1.65B |
 | claim CPU | 0.65B | 0.60B | 0.27B |
 | commit CPU | 2.66B | 2.60B | 1.45B |
-| ownership size | 6,737 | 5,248 | 4,716 |
+| stewardship size | 6,737 | 5,248 | 4,716 |
 | masterpiece size | 10,772 | 8,367 | 6,933 |
 | marketplace size | 4,833 | 4,119 | 3,600 |
 
@@ -252,14 +252,14 @@ Current standings (bench-aiken):
 |---|---:|---:|---:|---:|
 | masterpiece init | **1.27B** | 1.65B | **2.85M** | 4.12M |
 | commit 1 leaf | **1.42B** | 1.45B | **4.15M** | 4.52M |
-| ownership init | 0.05B | 0.05B | **0.07M** | 0.14M |
+| stewardship init | 0.05B | 0.05B | **0.07M** | 0.14M |
 | partialBuy | 0.62B | 0.59B | **0.99M** | 1.76M |
 | edit (4px) | 0.58B | 0.49B | 0.74M | 0.56M |
 | hatch | 0.51B | 0.40B | 0.36M | 0.24M |
 | claim 10x10 | 0.37B | 0.27B | **0.59M** | 0.70M |
 
 Sizes after the late single-use inline pass: **pebble smaller on ALL
-THREE** — ownership 4,555 vs 4,716; masterpiece 6,482 vs 6,933;
+THREE** — stewardship 4,555 vs 4,716; masterpiece 6,482 vs 6,933;
 marketplace 3,100 vs 3,600. Updated CPU/mem: init 1.26B/2.79M, commit
 1.41B/4.10M (both beat aiken), hatch 0.51B/0.35M, edit 0.58B/0.73M,
 claim 0.37B/0.58M, partialBuy 0.62B/0.98M.
@@ -286,7 +286,7 @@ inline pass (91 -> 14 residual bindings) and raw-data `amountOf` walks
 |---|---:|---:|---:|---:|
 | masterpiece init | **1.26B** | 1.65B | **2.79M** | 4.12M |
 | commit 1 leaf | **1.39B** | 1.45B | **4.08M** | 4.52M |
-| ownership init | **0.04B** | 0.05B | **0.07M** | 0.14M |
+| stewardship init | **0.04B** | 0.05B | **0.07M** | 0.14M |
 | partialBuy | 0.60B (~par) | 0.59B | **1.01M** | 1.76M |
 | claim 10x10 | 0.35B | 0.27B | **0.62M** | 0.70M |
 | hatch | 0.50B | 0.40B | 0.36M | 0.24M |
@@ -309,7 +309,7 @@ codegen quality:
   filters outputs by address once and re-scans the small result per
   rect; the pebble source re-filters per rect. Same validation rules,
   3x the comparisons.
-- **edit**: `ownerRects[n]` is indexed per row x rect (14 x N `dropList`
+- **edit**: `stewardRects[n]` is indexed per row x rect (14 x N `dropList`
   walks plus per-row arithmetic — headList 261 vs 110, addInteger 187
   vs 64). The Aiken port hoists the per-rect data out of the row loop.
 - **hatch**: remaining delta is per-output value inspection shape plus
@@ -319,7 +319,7 @@ codegen quality:
 
 Matching or beating Aiken on these three requires the PEBBLE CONTRACT
 SOURCE to adopt the same traversal shapes (filter-once-then-scan,
-hoisting `ownerRects[n]` per-rect data out of the row loop) — natural
+hoisting `stewardRects[n]` per-rect data out of the row loop) — natural
 contract-side follow-ups for the reporter, not compiler changes.
 
 ### Shipped compiler optimizations (this loop)
@@ -352,7 +352,7 @@ With the reporter's traversal reshaping + two more compiler changes
 | commit | **1.36B / 4.10M** | 1.45B / 4.52M | beats |
 | claim | **0.25B / 0.49M** | 0.27B / 0.70M | **beats (new)** |
 | partialBuy | **0.57B / 1.03M** | 0.59B / 1.76M | **beats (new)** |
-| ownership init | **0.04B / 0.08M** | 0.05B / 0.14M | beats |
+| stewardship init | **0.04B / 0.08M** | 0.05B / 0.14M | beats |
 | hatch | 0.46B / 0.40M | 0.40B / 0.24M | trails |
 | edit | 0.59B / 0.86M | 0.49B / 0.56M | trails |
 

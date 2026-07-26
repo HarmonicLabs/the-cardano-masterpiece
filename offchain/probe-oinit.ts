@@ -1,4 +1,4 @@
-// devnet probe: real ownership init, script INLINE (fast miscompile check).
+// devnet probe: real stewardship init, script INLINE (fast miscompile check).
 // OFLAT=<path to flat> overrides the compiled script.
 import {
     Value, Hash28, Script, Cbor, CborBytes, DataConstr, DataI, DataB,
@@ -19,7 +19,7 @@ const utxos = queryUtxos(w.address);
 const collateral = utxos.find(u => u.resolved.value.lovelaces === 10_000_000n)!;
 const funds = utxos.find(u => u.resolved.value.lovelaces === 500_000_000n)!;
 
-const flatPath = process.env.OFLAT ?? "../out/ownership/out.flat";
+const flatPath = process.env.OFLAT ?? "../out/stewardship/out.flat";
 const prog = parseUPLC(new Uint8Array(readFileSync(flatPath)), "flat");
 let body: UPLCTerm = prog.body;
 body = new Application(body, UPLCConst.data(w.address.toData()));
@@ -48,4 +48,4 @@ await signSubmitAwait({
     }],
     changeAddress: w.address,
 }, w, "probe-oinit", address);
-console.log("OWNERSHIP INIT (inline) PASSED");
+console.log("STEWARDSHIP INIT (inline) PASSED");

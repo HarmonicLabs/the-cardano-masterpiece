@@ -10,7 +10,7 @@ export interface CanvasStateInfo {
     network: string;
     masterpieceAddress: string;
     masterpiecePolicy: string;
-    ownershipPolicy: string;
+    stewardshipPolicy: string;
     pricePerPixelLovelace: string;
 }
 

@@ -26,12 +26,12 @@ export const N_LEAFS = 84;
 export const LOVELACE_PER_PIXEL = 3_000_000n;   // genesis/fallback default (live price read from chain)
 export const MIN_LISTING_LOVELACE = 2_000_000n;
 
-/** true if the given wallet address is the protocol owner (payment-cred match,
- * ignoring the staking part) — the owner claims free space for free. */
-export const isProtocolOwner = (address: string): boolean => {
+/** true if the given wallet address is the protocol steward (payment-cred match,
+ * ignoring the staking part) — the steward claims free space for free. */
+export const isProtocolSteward = (address: string): boolean => {
     try {
         return Address.fromString(address).paymentCreds.hash.toString()
-            === Address.fromString(config.protocolOwnerAddress).paymentCreds.hash.toString();
+            === Address.fromString(config.protocolStewardAddress).paymentCreds.hash.toString();
     } catch {
         return false;
     }
@@ -76,7 +76,7 @@ let _refs: { refO: UTxO; refM: UTxO; refK: UTxO } | undefined;
 export async function refScripts(): Promise<{ refO: UTxO; refM: UTxO; refK: UTxO }> {
     if (!_refs) {
         const [o, m, k] = await bf.resolveUtxos([
-            new TxOutRef({ id: config.ownershipRefScript.txHash, index: config.ownershipRefScript.index }),
+            new TxOutRef({ id: config.stewardshipRefScript.txHash, index: config.stewardshipRefScript.index }),
             new TxOutRef({ id: config.masterpieceRefScript.txHash, index: config.masterpieceRefScript.index }),
             new TxOutRef({ id: config.marketplaceRefScript.txHash, index: config.marketplaceRefScript.index }),
         ]);
@@ -87,7 +87,7 @@ export async function refScripts(): Promise<{ refO: UTxO; refM: UTxO; refK: UTxO
 
 // ---- wallet funding -------------------------------------------------------
 const PROTECTED_REFS = [
-    `${config.ownershipRefScript.txHash}#${config.ownershipRefScript.index}`,
+    `${config.stewardshipRefScript.txHash}#${config.stewardshipRefScript.index}`,
     `${config.masterpieceRefScript.txHash}#${config.masterpieceRefScript.index}`,
     `${config.marketplaceRefScript.txHash}#${config.marketplaceRefScript.index}`,
 ];
@@ -152,7 +152,7 @@ export async function walletFunding(
 /** deed utxos held by the wallet, by asset name */
 export async function walletDeed(api: WalletApi, name: string): Promise<UTxO> {
     const nameHex = bytesToHex(asciiBytes(name));
-    const u = (await walletUtxos(api)).find((x) => amountOf(x, config.ownershipPolicy, nameHex) === 1n);
+    const u = (await walletUtxos(api)).find((x) => amountOf(x, config.stewardshipPolicy, nameHex) === 1n);
     if (!u) throw new Error(`this wallet does not hold the deed "${name}"`);
     return u;
 }
@@ -175,9 +175,9 @@ export const leafDatum = (idx: number, chunk: Uint8Array, rawCid: Uint8Array): D
     new DataConstr(1, [new DataI(idx), new DataB(rawCid), new DataB(chunk)]);
 
 export const oClaim = (rect: Rect): DataConstr => new DataConstr(0, [rectData(rect)]);
-// Free spend method 1: protocol owner claims free space without paying
-export const oOwnerClaim = (rect: Rect): DataConstr => new DataConstr(1, [rectData(rect)]);
-// LovelacePerPixel state (datum Constr 1): the owner-set price + its change redeemer
+// Free spend method 1: protocol steward claims free space without paying
+export const oStewardClaim = (rect: Rect): DataConstr => new DataConstr(1, [rectData(rect)]);
+// LovelacePerPixel state (datum Constr 1): the steward-set price + its change redeemer
 export const PRICE_NFT_NAME = asciiBytes("price-nft");
 export const PRICE_NFT_NAME_HEX = bytesToHex(PRICE_NFT_NAME);
 export const MIN_LOVELACE_PER_PIXEL = 1_000_000n;
@@ -255,10 +255,10 @@ export const asInt = (d: unknown): number => {
 
 export interface FreeNode { rect: Rect; utxo: UTxO; }
 export async function freeNodes(): Promise<FreeNode[]> {
-    const utxos = await utxosAt(config.ownershipAddress);
+    const utxos = await utxosAt(config.stewardshipAddress);
     const out: FreeNode[] = [];
     for (const u of utxos) {
-        if (amountOf(u, config.ownershipPolicy, "") !== 1n) continue;
+        if (amountOf(u, config.stewardshipPolicy, "") !== 1n) continue;
         if (!u.resolved.datum) continue;
         try {
             const d = asConstr(u.resolved.datum);
@@ -278,9 +278,9 @@ export async function freeNodes(): Promise<FreeNode[]> {
 // reference it; the NFT is what makes it un-counterfeitable.
 export interface PriceConfig { utxo: UTxO; pricePerPixel: bigint; }
 export async function priceConfig(): Promise<PriceConfig> {
-    const utxos = await utxosAt(config.ownershipAddress);
+    const utxos = await utxosAt(config.stewardshipAddress);
     for (const u of utxos) {
-        if (amountOf(u, config.ownershipPolicy, PRICE_NFT_NAME_HEX) !== 1n) continue;
+        if (amountOf(u, config.stewardshipPolicy, PRICE_NFT_NAME_HEX) !== 1n) continue;
         if (!u.resolved.datum) continue;
         const d = asConstr(u.resolved.datum);
         if (Number(d.constr) !== 1) continue;

@@ -1,5 +1,5 @@
 // ===========================================================================
-//  On-chain SVG artwork + CIP-25 metadata for ownership deed NFTs.
+//  On-chain SVG artwork + CIP-25 metadata for stewardship deed NFTs.
 //
 //  The SVG is deliberately tiny (~1 KB, ~1.4 KB base64): a carve mints up to
 //  5 deeds in one tx, and all their metadata must fit alongside the tx body
@@ -33,7 +33,7 @@ export function deedSvg(r: DeedRect): string {
         + `<rect x="24" y="24" width="592" height="592" fill="none" stroke="${GOLD}" opacity=".35"/>`
         + `<text x="320" y="180" text-anchor="middle" fill="${INK}" font-family="Georgia,serif" font-size="44">The Cardano</text>`
         + `<text x="320" y="232" text-anchor="middle" fill="${GOLD}" font-family="Georgia,serif" font-size="44">Masterpiece</text>`
-        + `<text x="320" y="285" text-anchor="middle" fill="${INK}" opacity=".55" font-family="Georgia,serif" font-size="16" letter-spacing="7">OWNERSHIP NFT</text>`
+        + `<text x="320" y="285" text-anchor="middle" fill="${INK}" opacity=".55" font-family="Georgia,serif" font-size="16" letter-spacing="7">STEWARDSHIP NFT</text>`
         + `<rect x="290" y="308" width="60" height="1" fill="${GOLD}"/>`
         + `<text x="320" y="352" text-anchor="middle" fill="${INK}" font-family="monospace" font-size="24">(${r.x0},${r.y0}) - (${r.x1},${r.y1})</text>`
         + `<text x="320" y="382" text-anchor="middle" fill="${INK}" opacity=".5" font-family="monospace" font-size="15">${w} x ${h} px</text>`

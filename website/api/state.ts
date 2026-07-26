@@ -14,9 +14,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
             network: config.network,
             masterpieceAddress: config.masterpieceAddress,
             masterpiecePolicy: config.masterpiecePolicy,
-            ownershipPolicy: config.ownershipPolicy,
+            stewardshipPolicy: config.stewardshipPolicy,
             pricePerPixelLovelace: price,
-        });   // no HTTP cache: the owner-set price stays live (the heavy
+        });   // no HTTP cache: the steward-set price stays live (the heavy
               // chainState is still shielded by its own in-memory cache)
     } catch (e) { fail(res, e); }
 }

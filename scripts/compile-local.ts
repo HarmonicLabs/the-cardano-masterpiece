@@ -3,7 +3,7 @@
 //
 // Usage:
 //   npm run compile:local                      # compiles both entries
-//   npm run compile:local -- src/ownership.pebble
+//   npm run compile:local -- src/stewardship.pebble
 //
 // The local compiler must be built first:
 //   cd ../pebble/packages/pebble && npm run build
@@ -77,7 +77,7 @@ const projectConfig: { outDir?: string; removeTraces?: boolean } = JSON.parse(
 );
 
 const entries = process.argv.slice(2);
-if (entries.length === 0) entries.push("./src/masterpiece.pebble", "./src/ownership.pebble", "./src/marketplace.pebble", "./src/lock.pebble");
+if (entries.length === 0) entries.push("./src/masterpiece.pebble", "./src/stewardship.pebble", "./src/marketplace.pebble", "./src/lock.pebble");
 
 let failed = false;
 for (const entry of entries) {

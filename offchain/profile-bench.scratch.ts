@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-    ownershipContract, masterpieceContract, marketplaceContract, buildBmpHeader,
+    stewardshipContract, masterpieceContract, marketplaceContract, buildBmpHeader,
     rootDatum, leafDatum, nurseryDatum, initialChunk, freeDatum, listingDatum,
     rectName, rectArea, txOutRefData,
     mpMintInit, mpCommit, mpEdit, mpHatch, oMintInit, oMintFree, oMintCarve, oClaim,
@@ -36,8 +36,8 @@ const config = JSON.parse(readFileSync(join(__dirname, "..", "website", "config.
 // ---- actors / fixtures ----------------------------------------------------
 const key = (f: number): PrivateKey => new PrivateKey(new Uint8Array(32).fill(f));
 const addrOf = (k: PrivateKey): Address => Address.testnet(Credential.keyHash(k.derivePublicKey().hash));
-const owner = addrOf(key(7));
-const ownerPkh = key(7).derivePublicKey().hash;
+const steward = addrOf(key(7));
+const stewardPkh = key(7).derivePublicKey().hash;
 const buyer = addrOf(key(8));
 const genesisRef = new TxOutRef({ id: "11".repeat(32), index: 0 });
 const bmpHeader = buildBmpHeader();
@@ -50,7 +50,7 @@ const u = (address: Address, value: Value, datum?: DataConstr): UTxO =>
 // ---- implementations ------------------------------------------------------
 interface Impl {
     name: string;
-    ownership: ContractBundle;
+    stewardship: ContractBundle;
     masterpiece: ContractBundle;
     marketplace: ContractBundle;
 }
@@ -79,17 +79,17 @@ function aikenApply(name: string, params: Data[]): ContractBundle {
     };
 }
 
-const pebbleOwn = ownershipContract(owner, genesisRef);
+const pebbleOwn = stewardshipContract(steward, genesisRef);
 const pebble: Impl = {
     name: "pebble",
-    ownership: pebbleOwn,
+    stewardship: pebbleOwn,
     masterpiece: masterpieceContract(pebbleOwn.hash.toBuffer(), genesisRef, bmpHeader),
     marketplace: marketplaceContract(pebbleOwn.hash.toBuffer()),
 };
-const aikenOwn = aikenApply("ownership", [owner.toData(), txOutRefData(genesisRef)]);
+const aikenOwn = aikenApply("stewardship", [steward.toData(), txOutRefData(genesisRef)]);
 const aiken: Impl = {
     name: "aiken",
-    ownership: aikenOwn,
+    stewardship: aikenOwn,
     masterpiece: aikenApply("masterpiece", [
         new DataB(aikenOwn.hash.toBuffer()), txOutRefData(genesisRef), new DataB(bmpHeader),
     ]),
@@ -113,13 +113,13 @@ const initCids = Array.from({ length: N_LEAFS }, () => cidV1Raw(initialChunk()))
 type Scenario = (impl: Impl) => ITxBuildArgs;
 const scenarios: Record<string, Scenario> = {
     "masterpiece init": (impl) => {
-        const genesisU = new UTxO({ utxoRef: genesisRef, resolved: new TxOut({ address: owner, value: Value.lovelaces(ADA(50)) }) });
+        const genesisU = new UTxO({ utxoRef: genesisRef, resolved: new TxOut({ address: steward, value: Value.lovelaces(ADA(50)) }) });
         const mp = impl.masterpiece;
-        const funding = u(owner, Value.lovelaces(ADA(200)));
+        const funding = u(steward, Value.lovelaces(ADA(200)));
         const gIdx = sortedRefIndex([genesisRef, funding.utxoRef], genesisRef);
         return {
             inputs: [genesisU, funding],
-            collaterals: [u(owner, Value.lovelaces(ADA(10)))],
+            collaterals: [u(steward, Value.lovelaces(ADA(10)))],
             mints: [{
                 value: tokens(mp.policyHex, [[LEAF_NFT_NAME, BigInt(N_LEAFS)], [ROOT_REF_NFT_NAME, 1n], [ROOT_USER_NFT_NAME, 1n]]),
                 script: { inline: mp.script, redeemer: mpMintInit(gIdx) },
@@ -127,9 +127,9 @@ const scenarios: Record<string, Scenario> = {
             outputs: [
                 { address: mp.address, value: withAda(ADA(15), tokens(mp.policyHex, [[LEAF_NFT_NAME, BigInt(N_LEAFS)]])), datum: nurseryDatum(0) },
                 { address: mp.address, value: withAda(ADA(30), tokens(mp.policyHex, [[ROOT_REF_NFT_NAME, 1n]])), datum: rootDatum(initCids, bmpHeader).data },
-                { address: owner, value: withAda(ADA(2), tokens(mp.policyHex, [[ROOT_USER_NFT_NAME, 1n]])) },
+                { address: steward, value: withAda(ADA(2), tokens(mp.policyHex, [[ROOT_USER_NFT_NAME, 1n]])) },
             ],
-            changeAddress: owner,
+            changeAddress: steward,
         };
     },
     "hatch leaf 0": (impl) => {
@@ -138,14 +138,14 @@ const scenarios: Record<string, Scenario> = {
         return {
             inputs: [
                 { utxo: nursery, inputScript: { script: mp.script, datum: "inline", redeemer: mpHatch() } },
-                u(owner, Value.lovelaces(ADA(200))),
+                u(steward, Value.lovelaces(ADA(200))),
             ],
-            collaterals: [u(owner, Value.lovelaces(ADA(10)))],
+            collaterals: [u(steward, Value.lovelaces(ADA(10)))],
             outputs: [
                 { address: mp.address, value: withAda(ADA(70), tokens(mp.policyHex, [[LEAF_NFT_NAME, 1n]])), datum: leafDatum(0, initialChunk()) },
                 { address: mp.address, value: withAda(ADA(15), tokens(mp.policyHex, [[LEAF_NFT_NAME, BigInt(N_LEAFS - 1)]])), datum: nurseryDatum(1) },
             ],
-            changeAddress: owner,
+            changeAddress: steward,
         };
     },
     "commit 1 leaf": (impl) => {
@@ -155,15 +155,15 @@ const scenarios: Record<string, Scenario> = {
         return {
             inputs: [
                 { utxo: root, inputScript: { script: mp.script, datum: "inline", redeemer: mpCommit([0]) } },
-                u(owner, Value.lovelaces(ADA(200))),
+                u(steward, Value.lovelaces(ADA(200))),
             ],
             readonlyRefInputs: [leaf],
-            collaterals: [u(owner, Value.lovelaces(ADA(10)))],
+            collaterals: [u(steward, Value.lovelaces(ADA(10)))],
             outputs: [{
                 address: mp.address, value: withAda(ADA(30), tokens(mp.policyHex, [[ROOT_REF_NFT_NAME, 1n]])),
                 datum: rootDatum(initCids, bmpHeader).data,
             }],
-            changeAddress: owner,
+            changeAddress: steward,
         };
     },
     "edit leaf 0 (4px)": (impl) => {
@@ -172,48 +172,48 @@ const scenarios: Record<string, Scenario> = {
         const newChunk = new Uint8Array(oldChunk);
         for (let y = 10; y < 12; y++) for (let x = 10; x < 12; x++) newChunk[y * 1024 + x] = 0;
         const leaf = u(mp.address, withAda(ADA(70), tokens(mp.policyHex, [[LEAF_NFT_NAME, 1n]])), leafDatum(0, oldChunk));
-        const deed = u(owner, withAda(ADA(2), tokens(impl.ownership.policyHex, [[rectName(claimRect), 1n]])));
+        const deed = u(steward, withAda(ADA(2), tokens(impl.stewardship.policyHex, [[rectName(claimRect), 1n]])));
         return {
             inputs: [
                 { utxo: leaf, inputScript: { script: mp.script, datum: "inline", redeemer: mpEdit([claimRect]) } },
-                u(owner, Value.lovelaces(ADA(200))),
+                u(steward, Value.lovelaces(ADA(200))),
             ],
             readonlyRefInputs: [deed],
-            requiredSigners: [ownerPkh],
-            collaterals: [u(owner, Value.lovelaces(ADA(10)))],
+            requiredSigners: [stewardPkh],
+            collaterals: [u(steward, Value.lovelaces(ADA(10)))],
             outputs: [{
                 address: mp.address, value: withAda(ADA(70), tokens(mp.policyHex, [[LEAF_NFT_NAME, 1n]])),
                 datum: leafDatum(0, newChunk),
             }],
-            changeAddress: owner,
+            changeAddress: steward,
         };
     },
     "claim 10x10 (4 comps)": (impl) => {
-        const own = impl.ownership;
+        const own = impl.stewardship;
         const freeNode = u(own.address, withAda(ADA(3), tokens(own.policyHex, [[FREE_TOKEN_NAME, 1n]])), freeDatum(wholeCanvas));
         const comps = carveComplements(wholeCanvas, claimRect);
         return {
             inputs: [
                 { utxo: freeNode, inputScript: { script: own.script, datum: "inline", redeemer: oClaim(claimRect) } },
-                u(owner, Value.lovelaces(ADA(600))),
+                u(steward, Value.lovelaces(ADA(600))),
             ],
-            collaterals: [u(owner, Value.lovelaces(ADA(10)))],
+            collaterals: [u(steward, Value.lovelaces(ADA(10)))],
             mints: [{
                 value: tokens(own.policyHex, [[rectName(claimRect), 1n], [FREE_TOKEN_NAME, BigInt(comps.length - 1)]]),
                 script: { inline: own.script, redeemer: oMintFree() },
             }],
             outputs: [
                 ...comps.map((r) => ({ address: own.address, value: withAda(ADA(3), tokens(own.policyHex, [[FREE_TOKEN_NAME, 1n]])), datum: freeDatum(r) })),
-                { address: owner, value: Value.lovelaces(rectArea(claimRect) * LOVELACE_PER_PIXEL) },
-                { address: owner, value: withAda(ADA(2), tokens(own.policyHex, [[rectName(claimRect), 1n]])) },
+                { address: steward, value: Value.lovelaces(rectArea(claimRect) * LOVELACE_PER_PIXEL) },
+                { address: steward, value: withAda(ADA(2), tokens(own.policyHex, [[rectName(claimRect), 1n]])) },
             ],
-            changeAddress: owner,
+            changeAddress: steward,
         };
     },
     "partialBuy (carve, 4 relists)": (impl) => {
-        const own = impl.ownership, mkt = impl.marketplace;
+        const own = impl.stewardship, mkt = impl.marketplace;
         const ppp = ADA(1);
-        const listing = u(mkt.address, withAda(ADA(2), tokens(own.policyHex, [[rectName(claimRect), 1n]])), listingDatum(owner, ppp));
+        const listing = u(mkt.address, withAda(ADA(2), tokens(own.policyHex, [[rectName(claimRect), 1n]])), listingDatum(steward, ppp));
         const comps = carveComplements(claimRect, innerRect);
         const mintEntries: [Uint8Array, bigint][] = [
             [rectName(claimRect), -1n], [rectName(innerRect), 1n],
@@ -230,21 +230,21 @@ const scenarios: Record<string, Scenario> = {
                 script: { inline: own.script, redeemer: oMintCarve(claimRect, innerRect) },
             }],
             outputs: [
-                ...comps.map((c) => ({ address: mkt.address, value: withAda(ADA(2), tokens(own.policyHex, [[rectName(c), 1n]])), datum: listingDatum(owner, ppp) })),
-                { address: owner, value: Value.lovelaces(ppp * rectArea(innerRect)), datum: txOutRefData(listing.utxoRef) },
+                ...comps.map((c) => ({ address: mkt.address, value: withAda(ADA(2), tokens(own.policyHex, [[rectName(c), 1n]])), datum: listingDatum(steward, ppp) })),
+                { address: steward, value: Value.lovelaces(ppp * rectArea(innerRect)), datum: txOutRefData(listing.utxoRef) },
                 { address: buyer, value: withAda(ADA(2), tokens(own.policyHex, [[rectName(innerRect), 1n]])) },
             ],
             changeAddress: buyer,
         };
     },
-    "ownership init": (impl) => {
-        const own = impl.ownership;
-        const genesisU = new UTxO({ utxoRef: genesisRef, resolved: new TxOut({ address: owner, value: Value.lovelaces(ADA(50)) }) });
-        const funding = u(owner, Value.lovelaces(ADA(200)));
+    "stewardship init": (impl) => {
+        const own = impl.stewardship;
+        const genesisU = new UTxO({ utxoRef: genesisRef, resolved: new TxOut({ address: steward, value: Value.lovelaces(ADA(50)) }) });
+        const funding = u(steward, Value.lovelaces(ADA(200)));
         const gIdx = sortedRefIndex([genesisRef, funding.utxoRef], genesisRef);
         return {
             inputs: [genesisU, funding],
-            collaterals: [u(owner, Value.lovelaces(ADA(10)))],
+            collaterals: [u(steward, Value.lovelaces(ADA(10)))],
             mints: [{
                 value: tokens(own.policyHex, [[FREE_TOKEN_NAME, 1n]]),
                 script: { inline: own.script, redeemer: oMintInit(gIdx) },
@@ -253,7 +253,7 @@ const scenarios: Record<string, Scenario> = {
                 address: own.address, value: withAda(ADA(3), tokens(own.policyHex, [[FREE_TOKEN_NAME, 1n]])),
                 datum: freeDatum(wholeCanvas),
             }],
-            changeAddress: owner,
+            changeAddress: steward,
         };
     },
 };
@@ -296,7 +296,7 @@ const fmtB = (n: number): string => `${(n / 1e9).toFixed(2)}B`;
 const fmtM = (n: number): string => `${(n / 1e6).toFixed(2)}M`;
 
 console.log("script sizes (applied, cbor-wrapped bytes):");
-for (const c of ["ownership", "masterpiece", "marketplace"] as const) {
+for (const c of ["stewardship", "masterpiece", "marketplace"] as const) {
     const p = pebble[c].script.bytes.length, a = aiken[c].script.bytes.length;
     console.log(`  ${c.padEnd(12)} pebble ${String(p).padStart(6)}  aiken ${String(a).padStart(6)}  (${(a / p * 100).toFixed(0)}%)`);
 }

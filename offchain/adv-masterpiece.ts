@@ -19,7 +19,7 @@ import {
     sortedRefIndex, findUtxoWithAsset, assetAmount, pureAdaUtxo, txBuilder, submitSignedTx, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
+    stewardshipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
     rootDatum, leafDatum, nurseryDatum, initialChunk, freeDatum, lovelacePerPixelDatum,
     mpMintInit, mpHatch, mpEdit, mpCommit, oMintInit, oMintFree, oClaim,
     carveComplements, rectName, rectArea,
@@ -64,13 +64,13 @@ const fundWork = dU.find((u) => u.resolved.value.lovelaces === ADA(2000))!;
 assert(coll && genesisO && genesisM && genesisO.utxoRef.toString() !== genesisM.utxoRef.toString() && fundRef && fundWork, "funding utxos");
 
 const bmp = buildBmpHeader();
-const own = ownershipContract(dep.address, genesisO.utxoRef);
+const own = stewardshipContract(dep.address, genesisO.utxoRef);
 const mp = masterpieceContract(own.hash.toBuffer(), genesisM.utxoRef, bmp);
 const lock = lockContract();
-console.log("  ownership:", own.policyHex, "\n  masterpiece:", mp.policyHex);
+console.log("  stewardship:", own.policyHex, "\n  masterpiece:", mp.policyHex);
 
 // ---------------------------------------------------------------------------
-step("0b. deploy ownership + masterpiece reference scripts");
+step("0b. deploy stewardship + masterpiece reference scripts");
 const dO = await signSubmitAwait({
     inputs: [fundRef],
     outputs: [{ address: lock.address, value: Value.lovelaces(ADA(35)), refScript: own.script, datum: lockedDatum() }],
@@ -89,7 +89,7 @@ const noRefs = (u: { utxoRef: { toString(): string } }): boolean =>
 const workUtxo = (min: bigint): UTxO => pureAdaUtxo(queryUtxos(dep.address).filter(noRefs).filter(notRef(coll)), min)!;
 
 // ---------------------------------------------------------------------------
-step("1. ownership init + 2. masterpiece init");
+step("1. stewardship init + 2. masterpiece init");
 {
     const gIdx = sortedRefIndex([genesisO.utxoRef, fundWork.utxoRef], genesisO.utxoRef);
     await signSubmitAwait({
@@ -101,7 +101,7 @@ step("1. ownership init + 2. masterpiece init");
             { address: own.address, value: withAda(ADA(3), own.policyHex, [[PRICE_NFT_NAME, 1n]]), datum: lovelacePerPixelDatum(LOVELACE_PER_PIXEL) },
         ],
         changeAddress: dep.address,
-    }, dep, "ownership-init", own.address);
+    }, dep, "stewardship-init", own.address);
 }
 const initCid = cidV1Raw(initialChunk());
 const initialLeafCids = Array.from({ length: N_LEAFS }, () => initCid);

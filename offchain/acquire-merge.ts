@@ -4,7 +4,7 @@
 //  plot and FREE space is acquired (partial-buy the listed part + claim the
 //  free part) and then MERGED into a single deed.
 //
-//  Scenario: seller (= protocolOwner) claims D=(0,0)-(100,100) and lists it.
+//  Scenario: seller (= protocolSteward) claims D=(0,0)-(100,100) and lists it.
 //  Buyer wants R=(0,0)-(60,150): the (0,0)-(60,100) part is partial-bought from
 //  the listing; the (0,100)-(60,150) part is claimed from free space; the two
 //  are then merged into (0,0)-(60,150).
@@ -17,7 +17,7 @@ import {
     sortedRefIndex, findUtxoWithAsset, pureAdaUtxo, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, marketplaceContract, lockContract, lockedDatum,
+    stewardshipContract, marketplaceContract, lockContract, lockedDatum,
     freeDatum, listingDatum, lovelacePerPixelDatum,
     oMintInit, oMintFree, oMintCarve, oMintMerge, oClaim, mPartialBuy,
     carveComplements, rectName, rectArea, txOutRefData,
@@ -51,7 +51,7 @@ const sColl = sU.find((u) => u.resolved.value.lovelaces === ADA(10))!;
 const genesisU = sU.find((u) => u.resolved.value.lovelaces === ADA(50))!;
 const sFunds = sU.find((u) => u.resolved.value.lovelaces === ADA(2000))!;
 
-const own = ownershipContract(seller.address, genesisU.utxoRef);   // protocolOwner = seller
+const own = stewardshipContract(seller.address, genesisU.utxoRef);   // protocolSteward = seller
 const market = marketplaceContract(own.hash.toBuffer());
 const lock = lockContract();
 const deed = (r: Rect, n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), rectName(r), n);
@@ -73,7 +73,7 @@ const refO = atLock.find((u) => u.utxoRef.id.toString() === deployHash && Number
 const refK = atLock.find((u) => u.utxoRef.id.toString() === deployHash && Number(u.utxoRef.index) === 1)!;
 const noRefs = (u: { utxoRef: { toString(): string } }) => u.utxoRef.toString() !== refO.utxoRef.toString() && u.utxoRef.toString() !== refK.utxoRef.toString();
 
-step("1. ownership init");
+step("1. stewardship init");
 {
     const gIdx = sortedRefIndex([genesisU.utxoRef, sFunds.utxoRef], genesisU.utxoRef);
     await signSubmitAwait({
@@ -85,7 +85,7 @@ step("1. ownership init");
             { address: own.address, value: withAda(ADA(3), priceNft(1n)), datum: lovelacePerPixelDatum(MIN_LOVELACE_PER_PIXEL) },
         ],
         changeAddress: seller.address,
-    }, seller, "ownership-init", own.address);
+    }, seller, "stewardship-init", own.address);
 }
 const priceCfg = () => findUtxoWithAsset(queryUtxos(own.address), own.policyHex, PRICE_NFT_NAME)!;
 const freeNodeOf = (r: Rect) => queryUtxos(own.address).find((u) => findUtxoWithAsset([u], own.policyHex, FREE_TOKEN_NAME) && udh(u) === dh(freeDatum(r)))!;
@@ -159,7 +159,7 @@ step("4. buyer CLAIMS (0,100)-(60,150) from free space");
         mints: [{ value: Value.add(deed(freePart, 1n), marker(BigInt(comps.length - 1))), script: { ref: refO, redeemer: oMintFree() } }],
         outputs: [
             ...comps.map((r) => ({ address: own.address, value: withAda(ADA(3), marker(1n)), datum: freeDatum(r) })),
-            { address: seller.address, value: Value.lovelaces(rectArea(freePart) * MIN_LOVELACE_PER_PIXEL) }, // pays protocolOwner (=seller)
+            { address: seller.address, value: Value.lovelaces(rectArea(freePart) * MIN_LOVELACE_PER_PIXEL) }, // pays protocolSteward (=seller)
             { address: buyer.address, value: withAda(ADA(2), deed(freePart, 1n)) },
         ],
         changeAddress: buyer.address,

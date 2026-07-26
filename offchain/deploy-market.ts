@@ -1,6 +1,6 @@
 // ===========================================================================
 //  Deploy the marketplace as a reference script on PREPROD.
-//  Parameterized by the CURRENTLY DEPLOYED ownership policy (website config).
+//  Parameterized by the CURRENTLY DEPLOYED stewardship policy (website config).
 // ===========================================================================
 import { Value } from "@harmoniclabs/buildooor";
 import { readFileSync } from "node:fs";
@@ -15,14 +15,14 @@ const config = JSON.parse(readFileSync(join(__dirname, "..", "website", "config.
 
 const provider = getProvider("preprod");
 const wallet = loadPreprodWallet();
-const market = marketplaceContract(hexToBytes(config.ownershipPolicy));
-console.log("ownership policy   :", config.ownershipPolicy);
+const market = marketplaceContract(hexToBytes(config.stewardshipPolicy));
+console.log("stewardship policy   :", config.stewardshipPolicy);
 console.log("marketplace policy :", market.policyHex);
 console.log("marketplace address:", market.address.toString());
 
 const utxos = await provider.queryUtxos(wallet.address);
 const protectedRefs = [
-    `${config.ownershipRefScript.txHash}#${config.ownershipRefScript.index}`,
+    `${config.stewardshipRefScript.txHash}#${config.stewardshipRefScript.index}`,
     `${config.masterpieceRefScript.txHash}#${config.masterpieceRefScript.index}`,
 ];
 const pure = utxos.filter((u) => {

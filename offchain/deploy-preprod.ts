@@ -5,13 +5,13 @@
 //
 //  Init-only — NO test claim/price-change/edit/commit. Produces a pristine
 //  canvas (genesis all-0xFF image, price = LOVELACE_PER_PIXEL) owned by the
-//  protocol owner, then rewrites website/config.json with the fresh addresses.
+//  protocol steward, then rewrites website/config.json with the fresh addresses.
 //
 //  Steps (one tx each, threaded by change ref so the utxo flow is
 //  deterministic):
 //    0. split one pure-ada utxo into labelled funding utxos
-//    1. deploy ownership + masterpiece reference scripts (parked at Lock)
-//    2. ownership init   (FREE marker + PRICE NFT + whole-canvas free node +
+//    1. deploy stewardship + masterpiece reference scripts (parked at Lock)
+//    2. stewardship init   (FREE marker + PRICE NFT + whole-canvas free node +
 //                         price-config node @ LOVELACE_PER_PIXEL)
 //    3. masterpiece init (N_LEAFS leaf markers -> nursery + CIP-68 root)
 //    4. deploy the marketplace reference script (parked at Lock)
@@ -19,8 +19,8 @@
 //
 //  Afterwards run `npx tsx hatch-all.ts` to hatch all leaves.
 //
-//  Protocol owner: PROTOCOL_OWNER env, else website/config.json's
-//  protocolOwnerAddress. The deployer wallet (keys/preprod.skey) funds + signs.
+//  Protocol steward: PROTOCOL_STEWARD env, else website/config.json's
+//  protocolStewardAddress. The deployer wallet (keys/preprod.skey) funds + signs.
 // ===========================================================================
 import { Address, Value, Hash28, UTxO, dataToCbor, type Data, type ITxBuildArgs } from "@harmoniclabs/buildooor";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { getProvider, loadPreprodWallet } from "./provider.ts";
 import { sortedRefIndex, findUtxoWithAsset, assetAmount, type Wallet } from "./lib.ts";
 import {
-    ownershipContract, masterpieceContract, marketplaceContract, lockContract, lockedDatum, buildBmpHeader,
+    stewardshipContract, masterpieceContract, marketplaceContract, lockContract, lockedDatum, buildBmpHeader,
     rootDatum, nurseryDatum, initialChunk, freeDatum, lovelacePerPixelDatum,
     mpMintInit, oMintInit,
     FREE_TOKEN_NAME, PRICE_NFT_NAME, LEAF_NFT_NAME, ROOT_REF_NFT_NAME, ROOT_USER_NFT_NAME,
@@ -52,11 +52,11 @@ const withAda = (lovelace: bigint, policyHex: string, entries: TokenEntry[]): Va
 
 const provider = getProvider("preprod");
 const wallet: Wallet = loadPreprodWallet();
-const owner = Address.fromString(process.env.PROTOCOL_OWNER ?? config.protocolOwnerAddress);
+const steward = Address.fromString(process.env.PROTOCOL_STEWARD ?? config.protocolStewardAddress);
 console.log("deployer      :", wallet.address.toString());
-console.log("protocol owner:", owner.toString());
-assert(owner.toString() === config.protocolOwnerAddress || process.env.PROTOCOL_OWNER,
-    "owner mismatch — set PROTOCOL_OWNER to override");
+console.log("protocol steward:", steward.toString());
+assert(steward.toString() === config.protocolStewardAddress || process.env.PROTOCOL_STEWARD,
+    "steward mismatch — set PROTOCOL_STEWARD to override");
 
 async function sendTx(args: ITxBuildArgs, label: string): Promise<string> {
     const txb = await provider.txBuilder();
@@ -81,7 +81,7 @@ const pure = (await provider.queryUtxos(wallet.address))
     })
     .sort((a, b) => Number(a.resolved.value.lovelaces - b.resolved.value.lovelaces));
 assert(pure.length > 0, "no pure-ada utxo >= 1000 ADA in the deployer wallet");
-// [0]=collateral 10, [1]=ownership genesis 5, [2]=masterpiece genesis 5,
+// [0]=collateral 10, [1]=stewardship genesis 5, [2]=masterpiece genesis 5,
 // [3]=ref-deploy funds 150, [4]=working funds 800
 const splitTx = await sendTx({
     inputs: [pure[0]],
@@ -104,11 +104,11 @@ assert(collateralU && genesisO && genesisM && fundRefs && fundWork, "5 funding u
 
 // contracts parameterized by the two genesis refs
 const bmpHeader = buildBmpHeader();
-const ownership = ownershipContract(owner, genesisO.utxoRef);
-const masterpiece = masterpieceContract(ownership.hash.toBuffer(), genesisM.utxoRef, bmpHeader);
-const market = marketplaceContract(ownership.hash.toBuffer());
+const stewardship = stewardshipContract(steward, genesisO.utxoRef);
+const masterpiece = masterpieceContract(stewardship.hash.toBuffer(), genesisM.utxoRef, bmpHeader);
+const market = marketplaceContract(stewardship.hash.toBuffer());
 const lock = lockContract();
-console.log("  ownership policy  :", ownership.policyHex);
+console.log("  stewardship policy  :", stewardship.policyHex);
 console.log("  masterpiece policy:", masterpiece.policyHex);
 console.log("  marketplace policy:", market.policyHex);
 
@@ -116,9 +116,9 @@ console.log("  marketplace policy:", market.policyHex);
 step("1. deploy reference scripts (parked at Lock, permanently unspendable)");
 const deployO = await sendTx({
     inputs: [fundRefs],
-    outputs: [{ address: lock.address, value: Value.lovelaces(ADA(35)), refScript: ownership.script, datum: lockedDatum() }],
+    outputs: [{ address: lock.address, value: Value.lovelaces(ADA(35)), refScript: stewardship.script, datum: lockedDatum() }],
     changeAddress: wallet.address,
-}, "deploy-ref-ownership");
+}, "deploy-ref-stewardship");
 const deployM = await sendTx({
     inputs: [byRef(await provider.queryUtxos(wallet.address), deployO, 1)!],
     outputs: [{ address: lock.address, value: Value.lovelaces(ADA(60)), refScript: masterpiece.script, datum: lockedDatum() }],
@@ -127,27 +127,27 @@ const deployM = await sendTx({
 const atLock = await provider.queryUtxos(lock.address.toString());
 const refO = byRef(atLock, deployO, 0)!;
 const refM = byRef(atLock, deployM, 0)!;
-assert(refO && refM, "ownership + masterpiece ref scripts parked");
+assert(refO && refM, "stewardship + masterpiece ref scripts parked");
 
 // ---------------------------------------------------------------------------
-step("2. ownership init (FREE marker + PRICE NFT + price config)");
+step("2. stewardship init (FREE marker + PRICE NFT + price config)");
 {
     const gIdx = sortedRefIndex([genesisO.utxoRef, fundWork.utxoRef], genesisO.utxoRef);
     await sendTx({
         inputs: [genesisO, fundWork],
         collaterals: [collateralU],
         mints: [{
-            value: tokens(ownership.policyHex, [[FREE_TOKEN_NAME, 1n], [PRICE_NFT_NAME, 1n]]),
+            value: tokens(stewardship.policyHex, [[FREE_TOKEN_NAME, 1n], [PRICE_NFT_NAME, 1n]]),
             script: { ref: refO, redeemer: oMintInit(gIdx) },
         }],
         outputs: [
-            { address: ownership.address, value: withAda(ADA(3), ownership.policyHex, [[FREE_TOKEN_NAME, 1n]]), datum: freeDatum({ x0: 0, y0: 0, x1: 1008, y1: 1008 }) },
-            { address: ownership.address, value: withAda(ADA(3), ownership.policyHex, [[PRICE_NFT_NAME, 1n]]), datum: lovelacePerPixelDatum(LOVELACE_PER_PIXEL) },
+            { address: stewardship.address, value: withAda(ADA(3), stewardship.policyHex, [[FREE_TOKEN_NAME, 1n]]), datum: freeDatum({ x0: 0, y0: 0, x1: 1008, y1: 1008 }) },
+            { address: stewardship.address, value: withAda(ADA(3), stewardship.policyHex, [[PRICE_NFT_NAME, 1n]]), datum: lovelacePerPixelDatum(LOVELACE_PER_PIXEL) },
         ],
         changeAddress: wallet.address,
-    }, "ownership-init");
-    const free = (await provider.queryUtxos(ownership.address))
-        .filter((u) => assetAmount(u, ownership.policyHex, FREE_TOKEN_NAME) === 1n);
+    }, "stewardship-init");
+    const free = (await provider.queryUtxos(stewardship.address))
+        .filter((u) => assetAmount(u, stewardship.policyHex, FREE_TOKEN_NAME) === 1n);
     assert.equal(free.length, 1, "one whole-canvas free node");
     console.log(`  free node + price config @ ${Number(LOVELACE_PER_PIXEL) / 1e6} ADA/px ✓`);
 }
@@ -158,7 +158,7 @@ const initCid = cidV1Raw(initialChunk());
 const rootD0 = rootDatum(Array.from({ length: N_LEAFS }, () => initCid), bmpHeader);
 {
     const oi = await provider.queryUtxos(wallet.address);
-    // working change from the ownership-init tx (output index 2 = change)
+    // working change from the stewardship-init tx (output index 2 = change)
     const workUtxo = oi.filter((u) => {
         const j = u.resolved.value.toJson() as Record<string, unknown>;
         return Object.keys(j).length === 1 && u.resolved.value.lovelaces >= ADA(100)
@@ -177,7 +177,7 @@ const rootD0 = rootDatum(Array.from({ length: N_LEAFS }, () => initCid), bmpHead
         outputs: [
             { address: masterpiece.address, value: withAda(ADA(15), masterpiece.policyHex, [[LEAF_NFT_NAME, BigInt(N_LEAFS)]]), datum: nurseryDatum(0) },
             { address: masterpiece.address, value: withAda(ADA(30), masterpiece.policyHex, [[ROOT_REF_NFT_NAME, 1n]]), datum: rootD0.data },
-            { address: owner, value: withAda(ADA(2), masterpiece.policyHex, [[ROOT_USER_NFT_NAME, 1n]]) }, // (222) collection token -> owner
+            { address: steward, value: withAda(ADA(2), masterpiece.policyHex, [[ROOT_USER_NFT_NAME, 1n]]) }, // (222) collection token -> steward
         ],
         changeAddress: wallet.address,
     }, "masterpiece-init");
@@ -210,12 +210,12 @@ const next = {
     network: "preprod",
     masterpiecePolicy: masterpiece.policyHex,
     masterpieceAddress: masterpiece.address.toString(),
-    ownershipPolicy: ownership.policyHex,
-    ownershipAddress: ownership.address.toString(),
-    protocolOwnerAddress: owner.toString(),
+    stewardshipPolicy: stewardship.policyHex,
+    stewardshipAddress: stewardship.address.toString(),
+    protocolStewardAddress: steward.toString(),
     marketplacePolicy: market.policyHex,
     marketplaceAddress: market.address.toString(),
-    ownershipRefScript: { txHash: deployO, index: 0 },
+    stewardshipRefScript: { txHash: deployO, index: 0 },
     masterpieceRefScript: { txHash: deployM, index: 0 },
     marketplaceRefScript: { txHash: deployK, index: 0 },
 };

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { SignProgress } from "../lib/sign.js";
 
 const PHASE: Record<string, string> = {
@@ -12,8 +13,23 @@ const PHASE: Record<string, string> = {
  *  • bulk (CIP-103) wallets: one prompt, then quick submits;
  *  • one-prompt-per-tx wallets: a per-tx checklist, since each tx must confirm
  *    before the next can be signed.
+ *
+ * `onClose` (if given) renders an × button and auto-dismisses shortly after the
+ * batch is done — the caller keeps doing background work (confirm/publish) after
+ * the modal is gone.
  */
-export function TxProgress({ p }: { p: SignProgress | null }) {
+export function TxProgress({ p, onClose }: { p: SignProgress | null; onClose?: () => void }) {
+    // latest onClose without retriggering the auto-dismiss timer on every render
+    const closeRef = useRef(onClose);
+    closeRef.current = onClose;
+
+    const done = p?.phase === "done";
+    useEffect(() => {
+        if (!done) return;
+        const t = setTimeout(() => closeRef.current?.(), 1600);
+        return () => clearTimeout(t);
+    }, [done]);
+
     if (!p) return null;
     const { total, current, phase, bulk, hashes } = p;
     const pct = phase === "done" ? 100 : Math.round((hashes.length / total) * 100);
@@ -21,6 +37,9 @@ export function TxProgress({ p }: { p: SignProgress | null }) {
     return (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Signing transactions">
             <div className="modal-card txprog">
+                {onClose && (
+                    <button className="modal-close" aria-label="close" onClick={onClose}>×</button>
+                )}
                 <h3>{phase === "done" ? "Done" : "Signing transactions"}</h3>
 
                 {bulk && current === 0 ? (

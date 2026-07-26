@@ -214,6 +214,8 @@ canvas.painter { display: block; image-rendering: pixelated; max-width: 100%; ma
     font-family: var(--mono); font-size: .68rem; word-break: break-all;
     color: var(--ink-faint); text-align: center; max-width: min(92vw, 780px);
 }
+.uri a { color: var(--ink-soft); text-decoration: underline; text-underline-offset: 2px; }
+.uri a:hover { color: var(--ink); }
 
 /* ---- action rows --------------------------------------------------------- */
 .actionbar {
@@ -276,11 +278,14 @@ canvas.painter { display: block; image-rendering: pixelated; max-width: 100%; ma
 
 /* ---- footer -------------------------------------------------------------- */
 footer {
+    display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; justify-content: center; align-items: center;
     text-align: center; padding: 1.4rem;
     border-top: 1px solid var(--line-soft);
     font-size: .62rem; text-transform: uppercase; letter-spacing: .28em;
     color: var(--ink-faint);
 }
+footer a { color: var(--ink-soft); text-decoration: none; }
+footer a:hover { color: var(--ink); }
 
 /* ---- batch-signing progress modal --------------------------------------- */
 .modal-overlay {
@@ -290,11 +295,21 @@ footer {
     padding: 1rem;
 }
 .modal-card {
+    position: relative;
     background: var(--card); border: 1px solid var(--line);
     border-radius: 14px; padding: 1.4rem 1.6rem;
     max-width: min(92vw, 440px); width: 100%;
     box-shadow: 0 12px 40px rgba(0, 0, 0, .35); text-align: center;
 }
+.modal-close {
+    position: absolute; top: .5rem; right: .6rem;
+    width: 1.9rem; height: 1.9rem; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: none; background: transparent; cursor: pointer;
+    font-size: 1.35rem; line-height: 1; color: var(--ink-faint);
+    border-radius: 8px;
+}
+.modal-close:hover { color: var(--ink); background: var(--line-soft); }
 .modal-card h3 { margin: 0 0 .6rem; font-size: 1.05rem; color: var(--ink); }
 .modal-card .muted { display: block; }
 .modal-card .muted.small { font-size: .74rem; margin-top: .5rem; line-height: 1.4; }

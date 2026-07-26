@@ -10,7 +10,7 @@ ipfs storage
 
 the 128 leafs are stored as an onchain linked list contract
 
-each ownership nft created is stored in another onchain linked list, to guarantee uniquness.
+each stewardship nft created is stored in another onchain linked list, to guarantee uniquness.
 
-to edit a pixel, a reference input having an nft corresponding to the ownership of that pixel should be referenced in the edit tx.
+to edit a pixel, a reference input having an nft corresponding to the stewardship of that pixel should be referenced in the edit tx.
 

@@ -1,4 +1,4 @@
-// Verify the recompiled ownership contract passes the exact-claim (k=0)
+// Verify the recompiled stewardship contract passes the exact-claim (k=0)
 // scenario that failed on the deployed script (PEBBLE_BUGS.md BUG 18).
 // Takes the captured failing ScriptContext, patches every occurrence of the
 // old policy hash to the freshly-applied script's hash, and evaluates.
@@ -9,17 +9,17 @@ import { Machine } from "@harmoniclabs/plutus-machine";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ownershipContract } from "./contracts.ts";
+import { stewardshipContract } from "./contracts.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(readFileSync(join(__dirname, "..", "website", "config.json"), "utf8"));
 
 // genesisUtxo only matters for `mint init`, not for the claim path: any ref works
 const dummyGenesis = new TxOutRef({ id: "00".repeat(32), index: 0 });
-const own = ownershipContract(Address.fromString(config.protocolOwnerAddress), dummyGenesis);
-console.log("recompiled ownership policy:", own.policyHex);
+const own = stewardshipContract(Address.fromString(config.protocolStewardAddress), dummyGenesis);
+console.log("recompiled stewardship policy:", own.policyHex);
 
-const oldPolicy = process.env.OLDPOLICY ?? config.ownershipPolicy;
+const oldPolicy = process.env.OLDPOLICY ?? config.stewardshipPolicy;
 const ctxHex = readFileSync(process.env.CTX!, "utf8").trim()
     .replaceAll(oldPolicy, own.policyHex);
 

@@ -30,7 +30,9 @@ export function App() {
                 </Routes>
             </main>
             <footer>
-                every pixel served straight from preprod utxos — ipfs not involved
+                <span>every pixel served straight from preprod utxos — ipfs not involved</span>
+                <a href="https://github.com/HarmonicLabs/the-cardano-masterpiece"
+                   target="_blank" rel="noreferrer">source on GitHub ↗</a>
             </footer>
         </HashRouter>
     );

@@ -22,7 +22,7 @@ import {
     submitSignedTx, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, marketplaceContract, lockContract, lockedDatum,
+    stewardshipContract, marketplaceContract, lockContract, lockedDatum,
     freeDatum, listingDatum, lovelacePerPixelDatum,
     oMintInit, oMintFree, oMintCarve, oClaim, mPartialBuy,
     carveComplements, rectName, rectArea, txOutRefData,
@@ -46,7 +46,7 @@ const seller: Wallet = ensureWallet(`adv-seller-${Date.now()}`);
 const buyer: Wallet = ensureWallet(`adv-buyer-${Date.now()}`);
 const fundTx = fundFromGenesis([
     { address: seller.address, lovelace: ADA(10) },   // collateral
-    { address: seller.address, lovelace: ADA(50) },   // ownership genesis utxo
+    { address: seller.address, lovelace: ADA(50) },   // stewardship genesis utxo
     { address: seller.address, lovelace: ADA(700) },  // funds (claim pays 500 to self)
     { address: seller.address, lovelace: ADA(70) },   // ref-script deploys
     { address: buyer.address, lovelace: ADA(10) },    // collateral
@@ -60,14 +60,14 @@ const sellerFunds = sellerU.find((u) => u.resolved.value.lovelaces === ADA(700))
 console.log("  seller:", seller.address.toString());
 console.log("  buyer :", buyer.address.toString());
 
-// contracts: fresh ownership instance (protocolOwner = seller) + its marketplace
-const own = ownershipContract(seller.address, genesisU.utxoRef);
+// contracts: fresh stewardship instance (protocolSteward = seller) + its marketplace
+const own = stewardshipContract(seller.address, genesisU.utxoRef);
 const market = marketplaceContract(own.hash.toBuffer());
 const deed = (r: Rect, n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), rectName(r), n);
 const marker = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), FREE_TOKEN_NAME, n);
 const priceNft = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), PRICE_NFT_NAME, n);
 const withAda = (l: bigint, v: Value): Value => Value.add(Value.lovelaces(l), v);
-console.log("  ownership  :", own.policyHex);
+console.log("  stewardship  :", own.policyHex);
 console.log("  marketplace:", market.policyHex);
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ const noDeployRefs = (u: { utxoRef: { toString(): string } }): boolean =>
     u.utxoRef.toString() !== refO.utxoRef.toString() && u.utxoRef.toString() !== refK.utxoRef.toString();
 
 // ---------------------------------------------------------------------------
-step("1. ownership init (FREE marker + PRICE NFT + price config node)");
+step("1. stewardship init (FREE marker + PRICE NFT + price config node)");
 {
     const gIdx = sortedRefIndex([genesisU.utxoRef, sellerFunds.utxoRef], genesisU.utxoRef);
     await signSubmitAwait({
@@ -104,12 +104,12 @@ step("1. ownership init (FREE marker + PRICE NFT + price config node)");
             { address: own.address, value: withAda(ADA(3), priceNft(1n)), datum: lovelacePerPixelDatum(LOVELACE_PER_PIXEL) },
         ],
         changeAddress: seller.address,
-    }, seller, "ownership-init", own.address);
+    }, seller, "stewardship-init", own.address);
     console.log("  free node + price config live ✓");
 }
 
 // ---------------------------------------------------------------------------
-step("2. seller claims (10,10)-(20,20), pays 5 ada/px to protocol owner (self)");
+step("2. seller claims (10,10)-(20,20), pays 5 ada/px to protocol steward (self)");
 const deedRect: Rect = { x0: 10, y0: 10, x1: 20, y1: 20 }; // 100 px
 const claimComps = carveComplements(CANVAS, deedRect);      // 4 free-node complements
 {
@@ -221,8 +221,8 @@ step("4. ADVERSARIAL partialBuy attempts (must ALL fail; listing stays pristine)
     });
 
     // B — relist a complement back to the market but under the BUYER as seller:
-    //     ownership of the remaining pieces would silently change hands.
-    await attempt("relist a complement under the buyer as seller (owner changed)", (listingU) => {
+    //     stewardship of the remaining pieces would silently change hands.
+    await attempt("relist a complement under the buyer as seller (steward changed)", (listingU) => {
         const relists = honestRelists();
         relists[0] = { ...relists[0], datum: listingDatum(buyer.address, PPP) };
         return [...relists, honestPay(listingU), honestBuyerOut()];
@@ -290,7 +290,7 @@ step("5. HONEST partialBuy succeeds — verify buyer got ONLY the carved part");
             `buyer must NOT hold complement ${rectName(c)} — got more than carved`);
     console.log("  buyer received ONLY the carved inner rect ✓");
 
-    // (ii) every complement is back in the marketplace under the SAME owner + price
+    // (ii) every complement is back in the marketplace under the SAME steward + price
     const atMarket = queryUtxos(market.address);
     const wantDatum = datumHex(listingDatum(seller.address, PPP));
     for (const c of comps) {
@@ -302,7 +302,7 @@ step("5. HONEST partialBuy succeeds — verify buyer got ONLY the carved part");
     }
     // the parent deed is gone from the market (carved/burned)
     assert(!findUtxoWithAsset(atMarket, own.policyHex, rectName(deedRect)), "parent listing consumed");
-    console.log("  all 4 complements stayed in the marketplace under the same owner & price ✓");
+    console.log("  all 4 complements stayed in the marketplace under the same steward & price ✓");
 }
 
 console.log("\nMARKETPLACE CARVE ADVERSARIAL SUITE — ALL CHECKS PASSED ✓");

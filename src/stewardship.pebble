@@ -1,21 +1,21 @@
 // ===========================================================================
-//  Ownership — 2D land registry for the 1024x1024 canvas
+//  Stewardship — 2D land registry for the 1024x1024 canvas
 // ===========================================================================
 //
 //  Invariant (the whole security argument):
 //
-//    At all times, { Free rects } ∪ { OwnerNft rects } is an EXACT tiling of
+//    At all times, { Free rects } ∪ { StewardNft rects } is an EXACT tiling of
 //    the canvas — every pixel covered exactly once.
 //
 //  * `init` mints one Free node covering the whole canvas (trivial tiling).
 //  * `Free.claim` carves an owned rect out of a Free rect, re-tiling the
 //    remainder as ≤4 guillotine-complement Free nodes.
-//  * `split` / `merge` exchange OwnerNfts covering the same area.
+//  * `split` / `merge` exchange StewardNfts covering the same area.
 //
 //  Hence a UTxO holding a genuine FREE marker with coords R is an on-chain
-//  proof that no OwnerNft overlaps R: "the pixels are not taken".
+//  proof that no StewardNft overlaps R: "the pixels are not taken".
 //
-//  OwnerNfts live in user wallets, carry NO datum, and encode their coords in
+//  StewardNfts live in user wallets, carry NO datum, and encode their coords in
 //  the asset name as human-readable ASCII — "masterpiece-x0-y0-x1-y1",
 //  canonical decimal, half-open ranges [x0,x1) × [y0,y1) — so wallets and
 //  explorers show the collection and the plot at a glance. Uniqueness by
@@ -43,7 +43,7 @@ const FREE_TOKEN_NAME = #; // empty name; only lives on Free nodes at the script
 // LovelacePerPixel config node. "price" in ascii — never a valid rectName
 // (those are "masterpiece-..."), so it can't collide with a deed.
 const PRICE_NFT_NAME = "price-nft";
-// floor for the owner-set price, so a claim always carries a real payment
+// floor for the steward-set price, so a claim always carries a real payment
 const MIN_LOVELACE_PER_PIXEL = 1_000_000; // >= 1 ADA per pixel
 
 // ---- helpers --------------------------------------------------------------
@@ -60,7 +60,7 @@ function valueEq( a: Value, b: Value ): boolean {
 
 // `o` carries exactly 1 FREE marker at the script address. The DATUM check
 // happens at the call sites: it must decode through the contract datum union
-// (`as Ownership`), which is only in scope inside contract methods
+// (`as Stewardship`), which is only in scope inside contract methods
 // (PEBBLE_BUGS.md BUG 17)
 function isFreeNodeValue( o: TxOut, ownAddr: Address, ownPolicy: bytes ): boolean {
     return o.address == ownAddr
@@ -73,9 +73,9 @@ function sameRect( a: Coordinates, b: Coordinates ): boolean {
 
 // ---- contract -------------------------------------------------------------
 
-contract Ownership {
+contract Stewardship {
 
-    param protocolOwner: Address;
+    param protocolSteward: Address;
     param genesisUtxo: TxOutRef;
 
     // one-shot genesis: mint exactly 1 FREE marker, locked at this script
@@ -101,7 +101,7 @@ contract Ownership {
             tx.outputs.find( o => o.value.amountOf( policy, FREE_TOKEN_NAME ) == 1 );
         assert isFreeNodeValue( freeOut, ownAddr, policy );
         const InlineDatum{ datum: fd } = freeOut.datum;
-        const Free{ coords: fc } = fd as Ownership;
+        const Free{ coords: fc } = fd as Stewardship;
         assert sameRect( fc, Coordinates.Coordinates{ x0: 0, y0: 0, x1: CANVAS_WIDTH, y1: CANVAS_HEIGHT } );
 
         // the price config node: the price NFT + an initial lovelace-per-pixel,
@@ -110,7 +110,7 @@ contract Ownership {
             tx.outputs.find( o => o.value.amountOf( policy, PRICE_NFT_NAME ) == 1 );
         assert priceOut.address == ownAddr;
         const InlineDatum{ datum: pd } = priceOut.datum;
-        const LovelacePerPixel{ value: pv } = pd as Ownership;
+        const LovelacePerPixel{ value: pv } = pd as Stewardship;
         assert pv >= MIN_LOVELACE_PER_PIXEL;
     }
 
@@ -136,7 +136,7 @@ contract Ownership {
     // a plus its single guillotine complement b, identical to split(parent,
     // a, b). `carve` (below) subsumes it and also handles 2–4 pieces.
 
-    // burn OwnerNft(a) + OwnerNft(b), mint OwnerNft(a ∪ b); valid iff they
+    // burn StewardNft(a) + StewardNft(b), mint StewardNft(a ∪ b); valid iff they
     // share a full edge (a left of b, or a above b), so the union is a rect.
     // Both are real tokens (burns), hence valid, hence disjoint by the
     // tiling invariant.
@@ -162,7 +162,7 @@ contract Ownership {
         );
     }
 
-    // burn OwnerNft(parent), mint OwnerNft(target) plus the ≤4 guillotine
+    // burn StewardNft(parent), mint StewardNft(target) plus the ≤4 guillotine
     // complements of target in parent — carve ANY sub-rect out of a deed in
     // ONE tx (`split` can only make one straight cut per tx: a policy's
     // mint redeemer runs once). The complements are computed HERE, never
@@ -216,8 +216,8 @@ contract Ownership {
     state Free {
         coords: Coordinates;
 
-        // mint a new OwnerNft over `claimed` ⊆ this free rect, paying
-        // 5 ADA per pixel to the protocol owner; the remainder of the free
+        // mint a new StewardNft over `claimed` ⊆ this free rect, paying
+        // 5 ADA per pixel to the protocol steward; the remainder of the free
         // rect continues as its ≤4 guillotine complements
         spend claim(
             claimed: Coordinates
@@ -239,16 +239,16 @@ contract Ownership {
             assert isValidRect( claimed );
             assert rectContains( coords, claimed );
 
-            // pay the protocol, at the owner-set price. The price lives on the
+            // pay the protocol, at the steward-set price. The price lives on the
             // LovelacePerPixel config node, proven genuine by its unique NFT (a
             // counterfeit datum carries no NFT). Referenced, never spent, so any
             // number of claims can read the same price in parallel.
-            const protocolOwner = this.protocolOwner;
-            const Some{ value: payOut } = tx.outputs.find( o => o.address == protocolOwner );
+            const protocolSteward = this.protocolSteward;
+            const Some{ value: payOut } = tx.outputs.find( o => o.address == protocolSteward );
             const Some{ value: priceRef } = tx.refInputs.find( i =>
                 i.resolved.value.amountOf( ownPolicy, PRICE_NFT_NAME ) == 1 );
             const InlineDatum{ datum: prd } = priceRef.resolved.datum;
-            const LovelacePerPixel{ value: pricePerPixel } = prd as Ownership;
+            const LovelacePerPixel{ value: pricePerPixel } = prd as Stewardship;
             assert payOut.value.lovelaces() >= rectArea( claimed ) * pricePerPixel;
 
             // continuing free nodes: exactly the non-empty guillotine
@@ -265,7 +265,7 @@ contract Ownership {
                 const foT = outs.head();
                 assert isFreeNodeValue( foT, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdT } = foT.datum;
-                const Free{ coords: fcT } = fdT as Ownership;
+                const Free{ coords: fcT } = fdT as Stewardship;
                 assert sameRect( fcT, Coordinates.Coordinates{ x0: coords.x0, y0: coords.y0, x1: coords.x1, y1: claimed.y0 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -274,7 +274,7 @@ contract Ownership {
                 const foB = outs.head();
                 assert isFreeNodeValue( foB, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdB } = foB.datum;
-                const Free{ coords: fcB } = fdB as Ownership;
+                const Free{ coords: fcB } = fdB as Stewardship;
                 assert sameRect( fcB, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y1, x1: coords.x1, y1: coords.y1 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -283,7 +283,7 @@ contract Ownership {
                 const foL = outs.head();
                 assert isFreeNodeValue( foL, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdL } = foL.datum;
-                const Free{ coords: fcL } = fdL as Ownership;
+                const Free{ coords: fcL } = fdL as Stewardship;
                 assert sameRect( fcL, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y0, x1: claimed.x0, y1: claimed.y1 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -292,7 +292,7 @@ contract Ownership {
                 const foR = outs.head();
                 assert isFreeNodeValue( foR, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdR } = foR.datum;
-                const Free{ coords: fcR } = fdR as Ownership;
+                const Free{ coords: fcR } = fdR as Stewardship;
                 assert sameRect( fcR, Coordinates.Coordinates{ x0: claimed.x1, y0: claimed.y0, x1: coords.x1, y1: claimed.y1 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -300,7 +300,7 @@ contract Ownership {
             // no extra script outputs: the cursor must be fully consumed
             assert freeOuts.length() == k;
 
-            // exact mint: the OwnerNft plus the marker delta (k-1 may be
+            // exact mint: the StewardNft plus the marker delta (k-1 may be
             // -1: claiming a whole free rect burns its marker). 1 marker in
             // + (k-1) minted = k markers, all pinned to the k outputs above,
             // so none can leak elsewhere.
@@ -312,12 +312,12 @@ contract Ownership {
             );
         }
 
-        // PROTOCOL-OWNER free claim: the protocol owner carves an OwnerNft
-        // out of free space WITHOUT paying. Gated by the owner's signature;
-        // every value leaving the contract must go to the owner, and the
-        // minted deed must land with the owner (never smuggled into a
+        // PROTOCOL-STEWARD free claim: the protocol steward carves an StewardNft
+        // out of free space WITHOUT paying. Gated by the steward's signature;
+        // every value leaving the contract must go to the steward, and the
+        // minted deed must land with the steward (never smuggled into a
         // continuing free node). Same tiling/mint discipline as `claim`.
-        spend ownerClaim(
+        spend stewardClaim(
             claimed: Coordinates
         ) {
             const { tx, spendingRef, state: { coords } } = context;
@@ -334,22 +334,22 @@ contract Ownership {
             assert isValidRect( claimed );
             assert rectContains( coords, claimed );
 
-            // the protocol owner (a pub-key address — script creds cannot
+            // the protocol steward (a pub-key address — script creds cannot
             // sign) must have signed this tx
-            const protocolOwner = this.protocolOwner;
-            const PubKey{ hash: ownerPkh } = protocolOwner.payment;
-            assert tx.requiredSigners.includes( ownerPkh );
+            const protocolSteward = this.protocolSteward;
+            const PubKey{ hash: stewardPkh } = protocolSteward.payment;
+            assert tx.requiredSigners.includes( stewardPkh );
 
             // every output that is not a continuing free node (i.e. leaves
-            // the contract) must go to the protocol owner
-            assert tx.outputs.every( o => o.address == ownAddr || o.address == protocolOwner );
+            // the contract) must go to the protocol steward
+            assert tx.outputs.every( o => o.address == ownAddr || o.address == protocolSteward );
 
-            // ...and the minted deed must actually reach the owner. The
+            // ...and the minted deed must actually reach the steward. The
             // free-node check below only pins each node's marker, so without
             // this a deed could be locked into a free-node output at the
-            // contract; requiring it in an owner output closes that.
+            // contract; requiring it in an steward output closes that.
             const Some{ value: deedOut } = tx.outputs.find( o =>
-                o.address == protocolOwner
+                o.address == protocolSteward
                 && o.value.amountOf( ownPolicy, rectName( claimed ) ) == 1
             );
 
@@ -363,7 +363,7 @@ contract Ownership {
                 const foT = outs.head();
                 assert isFreeNodeValue( foT, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdT } = foT.datum;
-                const Free{ coords: fcT } = fdT as Ownership;
+                const Free{ coords: fcT } = fdT as Stewardship;
                 assert sameRect( fcT, Coordinates.Coordinates{ x0: coords.x0, y0: coords.y0, x1: coords.x1, y1: claimed.y0 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -372,7 +372,7 @@ contract Ownership {
                 const foB = outs.head();
                 assert isFreeNodeValue( foB, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdB } = foB.datum;
-                const Free{ coords: fcB } = fdB as Ownership;
+                const Free{ coords: fcB } = fdB as Stewardship;
                 assert sameRect( fcB, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y1, x1: coords.x1, y1: coords.y1 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -381,7 +381,7 @@ contract Ownership {
                 const foL = outs.head();
                 assert isFreeNodeValue( foL, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdL } = foL.datum;
-                const Free{ coords: fcL } = fdL as Ownership;
+                const Free{ coords: fcL } = fdL as Stewardship;
                 assert sameRect( fcL, Coordinates.Coordinates{ x0: coords.x0, y0: claimed.y0, x1: claimed.x0, y1: claimed.y1 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -390,7 +390,7 @@ contract Ownership {
                 const foR = outs.head();
                 assert isFreeNodeValue( foR, ownAddr, ownPolicy );
                 const InlineDatum{ datum: fdR } = foR.datum;
-                const Free{ coords: fcR } = fdR as Ownership;
+                const Free{ coords: fcR } = fdR as Stewardship;
                 assert sameRect( fcR, Coordinates.Coordinates{ x0: claimed.x1, y0: claimed.y0, x1: coords.x1, y1: claimed.y1 } );
                 outs = outs.tail();
                 k = k + 1;
@@ -422,7 +422,7 @@ contract Ownership {
     state LovelacePerPixel {
         value: int;
 
-        // only the protocol owner may retune the price. The config node is
+        // only the protocol steward may retune the price. The config node is
         // re-created at the script with the price NFT preserved and a new,
         // in-bounds value.
         spend change() {
@@ -436,9 +436,9 @@ contract Ownership {
             // is forgeable; the token is not)
             assert ownInput.resolved.value.amountOf( ownPolicy, PRICE_NFT_NAME ) == 1;
 
-            // only the protocol owner can change the price
-            const PubKey{ hash: ownerPkh } = this.protocolOwner.payment;
-            assert tx.requiredSigners.includes( ownerPkh );
+            // only the protocol steward can change the price
+            const PubKey{ hash: stewardPkh } = this.protocolSteward.payment;
+            assert tx.requiredSigners.includes( stewardPkh );
 
             // exactly one continuing config node at the script, NFT preserved,
             // new price within bounds. The price NFT is minted only at genesis
@@ -448,7 +448,7 @@ contract Ownership {
                 && o.value.amountOf( ownPolicy, PRICE_NFT_NAME ) == 1 );
             assert cfgOuts.length() == 1;
             const InlineDatum{ datum: pd } = cfgOuts[0].datum;
-            const LovelacePerPixel{ value: newValue } = pd as Ownership;
+            const LovelacePerPixel{ value: newValue } = pd as Stewardship;
             assert newValue >= MIN_LOVELACE_PER_PIXEL;
         }
     }

@@ -7,7 +7,7 @@ trend tables below.
 
 ## Methodology
 
-The three protocol contracts (ownership, masterpiece, marketplace) were
+The three protocol contracts (stewardship, masterpiece, marketplace) were
 reimplemented in Aiken (`aiken-port/`) with a **byte-identical datum/redeemer
 ABI** and identical validation rules, at the live geometry (1024x1022 canvas,
 73 leaves x 14 rows, 14336-byte chunks). Because the ABI matches, one
@@ -17,7 +17,7 @@ through the **same transactions**, evaluated by the **same machine**
 
 Both implementations ACCEPT every scenario, which doubles as a semantic
 cross-check of the two codebases — including the composed partial buy, where
-the marketplace spend and the ownership carve mint validate together in one
+the marketplace spend and the stewardship carve mint validate together in one
 transaction.
 
 Reproduce with: `cd aiken-port && aiken build`, then
@@ -27,12 +27,12 @@ Reproduce with: `cd aiken-port && aiken build`, then
 
 | contract    | 07-23  | 01:13 | 03:16 | 04:11     | Aiken | Pebble/Aiken |
 |-------------|-------:|------:|------:|----------:|------:|-------------:|
-| ownership   |  6,768 | 5,248 | 4,817 | **4,632** | 4,716 |     **98 %** |
+| stewardship   |  6,768 | 5,248 | 4,817 | **4,632** | 4,716 |     **98 %** |
 | masterpiece | 10,895 | 8,367 | 6,574 | **6,407** | 6,933 |     **92 %** |
 | marketplace |  4,899 | 4,119 | 3,168 | **3,190** | 3,600 |     **89 %** |
 
 04:11: **all three Pebble scripts are now SMALLER than the Aiken build.**
-Total drop from 07-23: ownership -32 %, masterpiece -41 %, marketplace -35 %.
+Total drop from 07-23: stewardship -32 %, masterpiece -41 %, marketplace -35 %.
 
 ## Execution units per scenario
 
@@ -45,7 +45,7 @@ Pebble/Aiken over 100 % = Pebble costs more.
 | scenario                      | 07-23 | 01:13 | 02:43 | 03:16     | Aiken | Pebble/Aiken |
 |-------------------------------|------:|------:|------:|----------:|------:|-------------:|
 | masterpiece init              | 2.26  | 1.39  | 1.31  | **1.27**  | 1.65  |    **77 %**  |
-| ownership init                | 0.05  | 0.05  | 0.05  | 0.05      | 0.05  |      ~100 %  |
+| stewardship init                | 0.05  | 0.05  | 0.05  | 0.05      | 0.05  |      ~100 %  |
 | commit 1 leaf                 | 2.66  | 2.60  | 2.42  | **1.71**  | 1.45  |       118 %  |
 | partialBuy (carve, 4 relists) | 1.09  | 1.08  | 1.05  | **0.62**  | 0.59  |       105 %  |
 | hatch leaf 0                  | 1.12  | 1.07  | 0.71  | **0.51**  | 0.40  |       128 %  |
@@ -60,7 +60,7 @@ Memory (M units), 03:16 vs Aiken (Pebble/Aiken):
 | partialBuy       |   0.99 |  1.76 |     **56 %** |
 | claim            |   0.59 |  0.70 |     **84 %** |
 | commit 1 leaf    |   4.01 |  4.52 |     **89 %** |
-| ownership init   |   0.07 |  0.14 |     **50 %** |
+| stewardship init   |   0.07 |  0.14 |     **50 %** |
 | edit leaf 0      |   0.74 |  0.56 |       132 %  |
 | hatch leaf 0     |   0.36 |  0.24 |       150 %  |
 
@@ -84,7 +84,7 @@ Build-by-build highlights:
   hatch's checks, claim's complement verification): list traversal, data
   decoding, and closure calls — where Aiken's more mature optimizer
   currently produces 2.5–3x cheaper code.
-- **Tiny scripts are at parity** (ownership init: 0.05B both).
+- **Tiny scripts are at parity** (stewardship init: 0.05B both).
 - **Read as a snapshot, not a ceiling.** These numbers were taken right
   after fixes for Pebble BUGs 23–25; two compute-once regressions (BUGs
   16/24) each cost ~10x while present. The structural gap points at concrete

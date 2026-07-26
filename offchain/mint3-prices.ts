@@ -1,11 +1,11 @@
 // ===========================================================================
-//  DEVNET scenario: mint 3 ownership NFTs at 3 DIFFERENT prices per pixel.
+//  DEVNET scenario: mint 3 stewardship NFTs at 3 DIFFERENT prices per pixel.
 //
 //    npx tsx mint3-prices.ts
 //
-//  The protocol owner sets the price on the NFT-validated LovelacePerPixel
+//  The protocol steward sets the price on the NFT-validated LovelacePerPixel
 //  config node; each claim REFERENCES it and must pay area x price. Between
-//  claims the owner retunes the price UP (3 -> 5 -> 8 ADA/px), and we prove:
+//  claims the steward retunes the price UP (3 -> 5 -> 8 ADA/px), and we prove:
 //    * each claim at the CURRENT price succeeds and mints its deed;
 //    * a claim paying the PREVIOUS (now-too-low) price is REJECTED;
 //    * the config datum reflects each change, NFT preserved.
@@ -16,7 +16,7 @@ import {
     sortedRefIndex, findUtxoWithAsset, pureAdaUtxo, assetAmount, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, lockContract, lockedDatum,
+    stewardshipContract, lockContract, lockedDatum,
     freeDatum, lovelacePerPixelDatum, oMintInit, oMintFree, oClaim, oPriceChange,
     carveComplements, rectName, rectArea,
     FREE_TOKEN_NAME, PRICE_NFT_NAME, type Rect,
@@ -39,58 +39,58 @@ const P1 = ADA(3), P2 = ADA(5), P3 = ADA(8);
 
 // ---------------------------------------------------------------------------
 step("0. wallets + funding");
-const owner: Wallet = ensureWallet(`p3-owner-${Date.now()}`);   // protocol owner
+const steward: Wallet = ensureWallet(`p3-steward-${Date.now()}`);   // protocol steward
 const claimer: Wallet = ensureWallet(`p3-claim-${Date.now()}`); // pays to claim
 const fundTx = fundFromGenesis([
-    { address: owner.address, lovelace: ADA(10) },     // collateral
-    { address: owner.address, lovelace: ADA(50) },     // ownership genesis utxo
-    { address: owner.address, lovelace: ADA(70) },     // ref deploy
-    { address: owner.address, lovelace: ADA(60) },     // price-change funds
+    { address: steward.address, lovelace: ADA(10) },     // collateral
+    { address: steward.address, lovelace: ADA(50) },     // stewardship genesis utxo
+    { address: steward.address, lovelace: ADA(70) },     // ref deploy
+    { address: steward.address, lovelace: ADA(60) },     // price-change funds
     { address: claimer.address, lovelace: ADA(10) },   // collateral
     { address: claimer.address, lovelace: ADA(200) },  // claim payments (<= 8*4 each)
 ], "fund-p3");
 awaitTxAtAddr(claimer.address, fundTx);
-const ownerU = queryUtxos(owner.address);
-const ownerColl = ownerU.find((u) => u.resolved.value.lovelaces === ADA(10))!;
-const genesisU = ownerU.find((u) => u.resolved.value.lovelaces === ADA(50))!;
+const stewardU = queryUtxos(steward.address);
+const stewardColl = stewardU.find((u) => u.resolved.value.lovelaces === ADA(10))!;
+const genesisU = stewardU.find((u) => u.resolved.value.lovelaces === ADA(50))!;
 const claimerColl = queryUtxos(claimer.address).find((u) => u.resolved.value.lovelaces === ADA(10))!;
-console.log("  owner  :", owner.address.toString());
+console.log("  steward  :", steward.address.toString());
 console.log("  claimer:", claimer.address.toString());
 
-const own = ownershipContract(owner.address, genesisU.utxoRef);
+const own = stewardshipContract(steward.address, genesisU.utxoRef);
 const deed = (r: Rect, n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), rectName(r), n);
 const marker = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), FREE_TOKEN_NAME, n);
 const priceTok = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), PRICE_NFT_NAME, n);
 const withAda = (l: bigint, v: Value): Value => Value.add(Value.lovelaces(l), v);
-console.log("  ownership:", own.policyHex);
+console.log("  stewardship:", own.policyHex);
 
 // ---------------------------------------------------------------------------
-step("0b. deploy ownership ref (Lock-parked)");
+step("0b. deploy stewardship ref (Lock-parked)");
 const lock = lockContract();
 const deployHash = await signSubmitAwait({
-    inputs: [ownerU.find((u) => u.resolved.value.lovelaces === ADA(70))!],
+    inputs: [stewardU.find((u) => u.resolved.value.lovelaces === ADA(70))!],
     outputs: [{ address: lock.address, value: Value.lovelaces(ADA(35)), refScript: own.script, datum: lockedDatum() }],
-    changeAddress: owner.address,
-}, owner, "deploy-ref", lock.address.toString());
+    changeAddress: steward.address,
+}, steward, "deploy-ref", lock.address.toString());
 const refO = queryUtxos(lock.address).find((u) =>
     u.utxoRef.id.toString() === deployHash && Number(u.utxoRef.index) === 0)!;
 const notDeploy = notRef(refO);
 
 // ---------------------------------------------------------------------------
-step(`1. ownership init (price = ${P1 / ADA(1)} ADA/px)`);
+step(`1. stewardship init (price = ${P1 / ADA(1)} ADA/px)`);
 {
-    const funds = pureAdaUtxo(queryUtxos(owner.address).filter(notDeploy).filter(notRef(ownerColl)), ADA(20))!;
+    const funds = pureAdaUtxo(queryUtxos(steward.address).filter(notDeploy).filter(notRef(stewardColl)), ADA(20))!;
     const gIdx = sortedRefIndex([genesisU.utxoRef, funds.utxoRef], genesisU.utxoRef);
     await signSubmitAwait({
         inputs: [genesisU, funds],
-        collaterals: [ownerColl],
+        collaterals: [stewardColl],
         mints: [{ value: Value.add(marker(1n), priceTok(1n)), script: { ref: refO, redeemer: oMintInit(gIdx) } }],
         outputs: [
             { address: own.address, value: withAda(ADA(3), marker(1n)), datum: freeDatum(CANVAS) },
             { address: own.address, value: withAda(ADA(3), priceTok(1n)), datum: lovelacePerPixelDatum(P1) },
         ],
-        changeAddress: owner.address,
-    }, owner, "ownership-init", own.address);
+        changeAddress: steward.address,
+    }, steward, "stewardship-init", own.address);
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -115,7 +115,7 @@ function freeNodeFor(r: Rect): { rect: Rect; utxo: ReturnType<typeof queryUtxos>
 }
 const priceCfg = () => findUtxoWithAsset(queryUtxos(own.address), own.policyHex, PRICE_NFT_NAME)!;
 
-/** build a claim tx paying `payPerPixel` to the owner; returns the ITxBuildArgs */
+/** build a claim tx paying `payPerPixel` to the steward; returns the ITxBuildArgs */
 function claimArgs(claimed: Rect, payPerPixel: bigint) {
     const node = freeNodeFor(claimed);
     const comps = carveComplements(node.rect, claimed);
@@ -134,7 +134,7 @@ function claimArgs(claimed: Rect, payPerPixel: bigint) {
         mints: [{ value: mintVal, script: { ref: refO, redeemer: oMintFree() } }],
         outputs: [
             ...comps.map((r) => ({ address: own.address, value: withAda(ADA(3), marker(1n)), datum: freeDatum(r) })),
-            { address: owner.address, value: Value.lovelaces(rectArea(claimed) * payPerPixel) },
+            { address: steward.address, value: Value.lovelaces(rectArea(claimed) * payPerPixel) },
             { address: claimer.address, value: withAda(ADA(2), deed(claimed, 1n)) },
         ],
         changeAddress: claimer.address,
@@ -143,17 +143,17 @@ function claimArgs(claimed: Rect, payPerPixel: bigint) {
 
 async function changePriceTo(newPrice: bigint): Promise<void> {
     const cfg = priceCfg();
-    const funds = pureAdaUtxo(queryUtxos(owner.address).filter(notDeploy).filter(notRef(ownerColl)), ADA(10))!;
+    const funds = pureAdaUtxo(queryUtxos(steward.address).filter(notDeploy).filter(notRef(stewardColl)), ADA(10))!;
     await signSubmitAwait({
         inputs: [
             { utxo: cfg, referenceScript: { refUtxo: refO, datum: "inline", redeemer: oPriceChange() } },
             funds,
         ],
-        collaterals: [ownerColl],
-        requiredSigners: [owner.pkh],
+        collaterals: [stewardColl],
+        requiredSigners: [steward.pkh],
         outputs: [{ address: own.address, value: withAda(ADA(3), priceTok(1n)), datum: lovelacePerPixelDatum(newPrice) }],
-        changeAddress: owner.address,
-    }, owner, "price-change", own.address);
+        changeAddress: steward.address,
+    }, steward, "price-change", own.address);
     const after = priceCfg();
     const pv = ((after.resolved.datum as DataConstr).fields[0] as DataI).int;
     assert.equal(pv, newPrice, "config price updated");
@@ -167,7 +167,7 @@ assert(findUtxoWithAsset(queryUtxos(claimer.address), own.policyHex, rectName(pl
 console.log(`  deed A minted, paid ${rectArea(plotA) * P1 / ADA(1)} ADA (${rectArea(plotA)} px x ${P1 / ADA(1)}) ✓`);
 
 // ---------------------------------------------------------------------------
-step(`3. owner raises price ${P1 / ADA(1)} -> ${P2 / ADA(1)} ADA/px`);
+step(`3. steward raises price ${P1 / ADA(1)} -> ${P2 / ADA(1)} ADA/px`);
 await changePriceTo(P2);
 
 step("3b. ADVERSARIAL: claim B at the OLD price must FAIL");
@@ -185,7 +185,7 @@ assert(findUtxoWithAsset(queryUtxos(claimer.address), own.policyHex, rectName(pl
 console.log(`  deed B minted, paid ${rectArea(plotB) * P2 / ADA(1)} ADA ✓`);
 
 // ---------------------------------------------------------------------------
-step(`4. owner raises price ${P2 / ADA(1)} -> ${P3 / ADA(1)} ADA/px`);
+step(`4. steward raises price ${P2 / ADA(1)} -> ${P3 / ADA(1)} ADA/px`);
 await changePriceTo(P3);
 
 step("4b. ADVERSARIAL: claim C at the OLD price must FAIL");

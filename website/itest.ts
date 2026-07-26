@@ -4,7 +4,7 @@
 //    build tx via API -> sign locally (stand-in for CIP-30 signTx)
 //    -> submit via API -> verify on-chain effects through the API.
 //
-//  Costs real preprod tADA (claim pays 5₳/pixel to the protocol owner, which
+//  Costs real preprod tADA (claim pays 5₳/pixel to the protocol steward, which
 //  is the same wallet here, so only fees are burned).
 // ===========================================================================
 import { Tx, PrivateKey, Address, Credential } from "@harmoniclabs/buildooor";

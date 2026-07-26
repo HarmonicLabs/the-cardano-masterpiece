@@ -4,10 +4,10 @@
 //  Flow:
 //   0. wallet + funding (devnet: genesis faucet; preprod: keys/ + self-split)
 //   1. deploy both scripts as reference scripts (one tx each: 16KB limit)
-//   2. ownership init   (mint the FREE marker, whole-canvas free node)
+//   2. stewardship init   (mint the FREE marker, whole-canvas free node)
 //   3. masterpiece init (mint (100)/(222)/128 leaf markers -> nursery + root)
 //   4. hatch leaf 0 and leaf 1
-//   5. claim rect (0,0)-(2,2)  (pays 20 ada to protocolOwner = deployer)
+//   5. claim rect (0,0)-(2,2)  (pays 20 ada to protocolSteward = deployer)
 //   6. edit leaf 0 within the claimed rect (ref-input NFT + signature)
 //   7. commit leaf 0 into the root (whole-image CID + CIP-68 image update)
 //
@@ -22,7 +22,7 @@ import {
 } from "./lib.ts";
 import { getProvider, loadPreprodWallet, type ChainProvider } from "./provider.ts";
 import {
-    ownershipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
+    stewardshipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
     rootDatum, leafDatum, nurseryDatum, initialChunk, freeDatum, lovelacePerPixelDatum,
     rectName, rectArea,
     mpMintInit, mpCommit, mpEdit, mpHatch,
@@ -79,7 +79,7 @@ console.log("  deployer:", deployer.address.toString());
 const deployerAddr = deployer.address.toString();
 
 // dedicated utxo layout for the run, selected by (txid, index) of the split
-// tx: [0]=collateral 10, [1]=ownership genesis 5, [2]=masterpiece genesis 5,
+// tx: [0]=collateral 10, [1]=stewardship genesis 5, [2]=masterpiece genesis 5,
 // [3],[4]=working funds
 let splitTxId: string;
 if (provider.backend === "devnet") {
@@ -125,18 +125,18 @@ assert(collateralU && genesisO && genesisM && fundA && fundB, "expected the 5 fu
 // contracts (parameterized by the genesis refs picked above)
 // ---------------------------------------------------------------------------
 const bmpHeader = buildBmpHeader();
-// protocol owner: PROTOCOL_OWNER env overrides (receives 5₳/px payments and
-// can ownerClaim); defaults to the deployer for self-contained test runs
-const protocolOwner = process.env.PROTOCOL_OWNER
-    ? Address.fromString(process.env.PROTOCOL_OWNER)
+// protocol steward: PROTOCOL_STEWARD env overrides (receives 5₳/px payments and
+// can stewardClaim); defaults to the deployer for self-contained test runs
+const protocolSteward = process.env.PROTOCOL_STEWARD
+    ? Address.fromString(process.env.PROTOCOL_STEWARD)
     : deployer.address;
-console.log("  protocol owner    :", protocolOwner.toString());
-const ownership = ownershipContract(protocolOwner, genesisO.utxoRef);
-const masterpiece = masterpieceContract(ownership.hash.toBuffer(), genesisM.utxoRef, bmpHeader);
-const ownershipAddr = ownership.address.toString();
+console.log("  protocol steward    :", protocolSteward.toString());
+const stewardship = stewardshipContract(protocolSteward, genesisO.utxoRef);
+const masterpiece = masterpieceContract(stewardship.hash.toBuffer(), genesisM.utxoRef, bmpHeader);
+const stewardshipAddr = stewardship.address.toString();
 const masterpieceAddr = masterpiece.address.toString();
 const lock = lockContract();
-console.log("  ownership policy  :", ownership.policyHex);
+console.log("  stewardship policy  :", stewardship.policyHex);
 console.log("  masterpiece policy:", masterpiece.policyHex);
 console.log("  lock (refs park)  :", lock.address.toString());
 
@@ -149,10 +149,10 @@ const deployOHash = await sendTx({
     outputs: [
         // parked at the Lock address: PERMANENTLY unspendable, deployment
         // can never be destroyed (deposit is locked forever)
-        { address: lock.address, value: Value.lovelaces(ADA(35)), refScript: ownership.script, datum: lockedDatum() },
+        { address: lock.address, value: Value.lovelaces(ADA(35)), refScript: stewardship.script, datum: lockedDatum() },
     ],
     changeAddress: deployer.address,
-}, deployer, "deploy-ref-ownership", deployerAddr);
+}, deployer, "deploy-ref-stewardship", deployerAddr);
 const afterDeployO = await provider.queryUtxos(deployerAddr);
 const deployMHash = await sendTx({
     inputs: [byRef(afterDeployO, deployOHash, 1)!], // change of the previous tx
@@ -168,36 +168,36 @@ const refM = byRef(all, deployMHash, 0)!;
 assert(refO && refM, "reference script utxos");
 
 // ---------------------------------------------------------------------------
-// 2. ownership init
+// 2. stewardship init
 // ---------------------------------------------------------------------------
-step("2. ownership init");
+step("2. stewardship init");
 {
     const gIdx = sortedRefIndex([genesisO.utxoRef, fundB.utxoRef], genesisO.utxoRef);
     await sendTx({
         inputs: [genesisO, fundB],
         collaterals: [collateralU],
         mints: [{
-            value: tokens(ownership.policyHex, [[FREE_TOKEN_NAME, 1n], [PRICE_NFT_NAME, 1n]]),
+            value: tokens(stewardship.policyHex, [[FREE_TOKEN_NAME, 1n], [PRICE_NFT_NAME, 1n]]),
             script: { ref: refO, redeemer: oMintInit(gIdx) },
         }],
         outputs: [
             {
-                address: ownership.address,
-                value: withAda(ADA(3), ownership.policyHex, [[FREE_TOKEN_NAME, 1n]]),
+                address: stewardship.address,
+                value: withAda(ADA(3), stewardship.policyHex, [[FREE_TOKEN_NAME, 1n]]),
                 datum: freeDatum({ x0: 0, y0: 0, x1: 1008, y1: 1008 }),
             },
             { // the price config node: unique NFT + initial lovelace-per-pixel
-                address: ownership.address,
-                value: withAda(ADA(3), ownership.policyHex, [[PRICE_NFT_NAME, 1n]]),
+                address: stewardship.address,
+                value: withAda(ADA(3), stewardship.policyHex, [[PRICE_NFT_NAME, 1n]]),
                 datum: lovelacePerPixelDatum(LOVELACE_PER_PIXEL),
             },
         ],
         changeAddress: deployer.address,
-    }, deployer, "ownership-init", ownershipAddr);
-    const free = (await provider.queryUtxos(ownershipAddr))
-        .filter((u) => assetAmount(u, ownership.policyHex, FREE_TOKEN_NAME) === 1n);
+    }, deployer, "stewardship-init", stewardshipAddr);
+    const free = (await provider.queryUtxos(stewardshipAddr))
+        .filter((u) => assetAmount(u, stewardship.policyHex, FREE_TOKEN_NAME) === 1n);
     assert.equal(free.length, 1, "one free node");
-    assert.equal(assetAmount(free[0], ownership.policyHex, FREE_TOKEN_NAME), 1n, "free marker minted");
+    assert.equal(assetAmount(free[0], stewardship.policyHex, FREE_TOKEN_NAME), 1n, "free marker minted");
     console.log("  free node covers whole canvas ✓");
 }
 
@@ -343,11 +343,11 @@ for (let leaf = 0; leaf < 2; leaf++) {
 // ---------------------------------------------------------------------------
 if (process.env.DEPLOY_ONLY) {
     console.log("\nDEPLOY-ONLY DONE ✓ (no claims made)");
-    console.log("  ownership policy   :", ownership.policyHex);
-    console.log("  ownership address  :", ownershipAddr);
+    console.log("  stewardship policy   :", stewardship.policyHex);
+    console.log("  stewardship address  :", stewardshipAddr);
     console.log("  masterpiece policy :", masterpiece.policyHex);
     console.log("  masterpiece address:", masterpieceAddr);
-    console.log("  ownership ref      :", `${deployOHash}#0`);
+    console.log("  stewardship ref      :", `${deployOHash}#0`);
     console.log("  masterpiece ref    :", `${deployMHash}#0`);
     process.exit(0);
 }
@@ -359,10 +359,10 @@ step("5. claim (0,0)-(2,2)");
 const claimed: Rect = { x0: 0, y0: 0, x1: 2, y1: 2 };
 const claimedName = rectName(claimed);
 {
-    const free = await provider.queryUtxos(ownershipAddr);
-    const freeNode = findUtxoWithAsset(free, ownership.policyHex, FREE_TOKEN_NAME);
+    const free = await provider.queryUtxos(stewardshipAddr);
+    const freeNode = findUtxoWithAsset(free, stewardship.policyHex, FREE_TOKEN_NAME);
     assert(freeNode, "free node present");
-    const priceCfg = findUtxoWithAsset(free, ownership.policyHex, PRICE_NFT_NAME);
+    const priceCfg = findUtxoWithAsset(free, stewardship.policyHex, PRICE_NFT_NAME);
     assert(priceCfg, "price config node present");
     const wall = (await provider.queryUtxos(deployerAddr)).filter((u) =>
         u.resolved.value.lovelaces >= ADA(100));
@@ -382,34 +382,34 @@ const claimedName = rectName(claimed);
         readonlyRefInputs: [priceCfg],
         collaterals: [collateralU],
         mints: [{
-            // exact mint: OwnerNft +1, FREE marker k-1 = +1 (2 complements)
-            value: tokens(ownership.policyHex, [[claimedName, 1n], [FREE_TOKEN_NAME, 1n]]),
+            // exact mint: StewardNft +1, FREE marker k-1 = +1 (2 complements)
+            value: tokens(stewardship.policyHex, [[claimedName, 1n], [FREE_TOKEN_NAME, 1n]]),
             script: { ref: refO, redeemer: oMintFree() },
         }],
         outputs: [
-            { address: ownership.address, value: withAda(ADA(3), ownership.policyHex, [[FREE_TOKEN_NAME, 1n]]), datum: freeDatum(bottom) },
-            { address: ownership.address, value: withAda(ADA(3), ownership.policyHex, [[FREE_TOKEN_NAME, 1n]]), datum: freeDatum(right) },
-            { address: deployer.address, value: Value.lovelaces(price) }, // protocolOwner payment
-            { address: deployer.address, value: withAda(ADA(2), ownership.policyHex, [[claimedName, 1n]]) }, // the deed
+            { address: stewardship.address, value: withAda(ADA(3), stewardship.policyHex, [[FREE_TOKEN_NAME, 1n]]), datum: freeDatum(bottom) },
+            { address: stewardship.address, value: withAda(ADA(3), stewardship.policyHex, [[FREE_TOKEN_NAME, 1n]]), datum: freeDatum(right) },
+            { address: deployer.address, value: Value.lovelaces(price) }, // protocolSteward payment
+            { address: deployer.address, value: withAda(ADA(2), stewardship.policyHex, [[claimedName, 1n]]) }, // the deed
         ],
         changeAddress: deployer.address,
-    }, deployer, "claim", ownershipAddr);
+    }, deployer, "claim", stewardshipAddr);
 
-    const freeAfter = (await provider.queryUtxos(ownershipAddr))
-        .filter((u) => assetAmount(u, ownership.policyHex, FREE_TOKEN_NAME) === 1n);
+    const freeAfter = (await provider.queryUtxos(stewardshipAddr))
+        .filter((u) => assetAmount(u, stewardship.policyHex, FREE_TOKEN_NAME) === 1n);
     assert.equal(freeAfter.length, 2, "two complement free nodes");
-    const deed = findUtxoWithAsset(await provider.queryUtxos(deployerAddr), ownership.policyHex, claimedName);
-    assert(deed, "owner NFT in wallet");
-    console.log(`  owner NFT "${new TextDecoder().decode(claimedName)}" claimed ✓`);
+    const deed = findUtxoWithAsset(await provider.queryUtxos(deployerAddr), stewardship.policyHex, claimedName);
+    assert(deed, "steward NFT in wallet");
+    console.log(`  steward NFT "${new TextDecoder().decode(claimedName)}" claimed ✓`);
 }
 
 // ---------------------------------------------------------------------------
-// 5b. protocol owner retunes the price per pixel (LovelacePerPixel.change)
+// 5b. protocol steward retunes the price per pixel (LovelacePerPixel.change)
 // ---------------------------------------------------------------------------
-step("5b. owner changes price per pixel");
+step("5b. steward changes price per pixel");
 {
     const newPrice = 7_000_000n; // 5 -> 7 ADA/px
-    const cfg = findUtxoWithAsset(await provider.queryUtxos(ownershipAddr), ownership.policyHex, PRICE_NFT_NAME);
+    const cfg = findUtxoWithAsset(await provider.queryUtxos(stewardshipAddr), stewardship.policyHex, PRICE_NFT_NAME);
     assert(cfg, "price config present");
     const wall = (await provider.queryUtxos(deployerAddr)).filter((u) =>
         u.resolved.value.lovelaces >= ADA(20) && u.resolved.refScript === undefined)[0];
@@ -421,14 +421,14 @@ step("5b. owner changes price per pixel");
         collaterals: [collateralU],
         requiredSigners: [deployer.pkh],
         outputs: [{
-            address: ownership.address,
-            value: withAda(ADA(3), ownership.policyHex, [[PRICE_NFT_NAME, 1n]]),
+            address: stewardship.address,
+            value: withAda(ADA(3), stewardship.policyHex, [[PRICE_NFT_NAME, 1n]]),
             datum: lovelacePerPixelDatum(newPrice),
         }],
         changeAddress: deployer.address,
-    }, deployer, "price-change", ownershipAddr);
+    }, deployer, "price-change", stewardshipAddr);
 
-    const cfgAfter = findUtxoWithAsset(await provider.queryUtxos(ownershipAddr), ownership.policyHex, PRICE_NFT_NAME);
+    const cfgAfter = findUtxoWithAsset(await provider.queryUtxos(stewardshipAddr), stewardship.policyHex, PRICE_NFT_NAME);
     assert(cfgAfter, "price config still present after change");
     const pd = cfgAfter!.resolved.datum as DataConstr;
     assert.equal(Number(pd.constr), 1, "LovelacePerPixel datum");
@@ -451,7 +451,7 @@ const newLeafCid = cidV1Raw(newChunk);
         assetAmount(u, masterpiece.policyHex, LEAF_NFT_NAME) === 1n
         && utxoDatumHex(u) === datumHex(leafDatum(0, initialChunk())));
     assert(leaf0, "leaf 0 utxo");
-    const deed = findUtxoWithAsset(await provider.queryUtxos(deployerAddr), ownership.policyHex, claimedName);
+    const deed = findUtxoWithAsset(await provider.queryUtxos(deployerAddr), stewardship.policyHex, claimedName);
     assert(deed, "deed utxo");
     const wall = (await provider.queryUtxos(deployerAddr)).filter((u) =>
         u.resolved.value.lovelaces >= ADA(100)
@@ -476,7 +476,7 @@ const newLeafCid = cidV1Raw(newChunk);
 }
 
 // ---------------------------------------------------------------------------
-// 6b. ADVERSARIAL: you cannot change bytes you don't hold the OwnerNft of.
+// 6b. ADVERSARIAL: you cannot change bytes you don't hold the StewardNft of.
 // Build-only (buildooor runs the validator during build), so these never
 // touch chain state — they must all be REJECTED by the edit validator.
 // ---------------------------------------------------------------------------
@@ -487,12 +487,12 @@ step("6b. ADVERSARIAL edits must fail");
         assetAmount(u, masterpiece.policyHex, LEAF_NFT_NAME) === 1n
         && utxoDatumHex(u) === datumHex(leafDatum(0, newChunk)));   // the just-edited leaf 0
     assert(leaf0, "current leaf 0");
-    const deed = findUtxoWithAsset(await provider.queryUtxos(deployerAddr), ownership.policyHex, claimedName)!;
+    const deed = findUtxoWithAsset(await provider.queryUtxos(deployerAddr), stewardship.policyHex, claimedName)!;
     const wall = (await provider.queryUtxos(deployerAddr)).filter((u) =>
         u.resolved.value.lovelaces >= ADA(100) && u.utxoRef.toString() !== deed.utxoRef.toString());
 
     const attempt = async (
-        label: string, mutate: (c: Uint8Array) => void, ownerRects: Rect[],
+        label: string, mutate: (c: Uint8Array) => void, stewardRects: Rect[],
         signers: (typeof deployer.pkh)[] = [deployer.pkh], refDeeds: (typeof deed)[] = [deed],
     ): Promise<void> => {
         const badChunk = new Uint8Array(newChunk);
@@ -504,7 +504,7 @@ step("6b. ADVERSARIAL edits must fail");
             const txb = await provider.txBuilder();
             const tx = await txb.build({
                 inputs: [
-                    { utxo: leaf0, referenceScript: { refUtxo: refM, datum: "inline", redeemer: mpEdit(ownerRects) } },
+                    { utxo: leaf0, referenceScript: { refUtxo: refM, datum: "inline", redeemer: mpEdit(stewardRects) } },
                     wall[0],
                 ],
                 readonlyRefInputs: refDeeds,
@@ -527,11 +527,11 @@ step("6b. ADVERSARIAL edits must fail");
 
     // A — change a pixel OUTSIDE the owned (0,0)-(2,2) rect (no NFT for it)
     await attempt("paint pixel (3,3) — not owned", (c) => { c[3 * LINE_LENGTH + 3] = 0x11; }, [claimed]);
-    // B — claim ownership of a rect you hold no deed for
+    // B — claim stewardship of a rect you hold no deed for
     await attempt("edit claiming unowned rect (3,3)-(5,5)",
         (c) => { c[3 * LINE_LENGTH + 3] = 0x22; }, [{ x0: 3, y0: 3, x1: 5, y1: 5 }]);
     // C — edit your OWN rect but without signing as the deed's holder
-    await attempt("edit owned rect (0,0)-(2,2) without the owner's signature",
+    await attempt("edit owned rect (0,0)-(2,2) without the steward's signature",
         (c) => { c[0] = 0x33; }, [claimed], []);
     // D — reference no deed at all while changing owned pixels
     await attempt("edit with no deed referenced",

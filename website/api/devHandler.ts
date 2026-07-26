@@ -69,8 +69,8 @@ export async function apiHandler(req: IncomingMessage, res: ServerResponse): Pro
                 network: config.network,
                 masterpieceAddress: config.masterpieceAddress,
                 masterpiecePolicy: config.masterpiecePolicy,
-                ownershipPolicy: config.ownershipPolicy,
-                pricePerPixelLovelace: price,   // live owner-set price
+                stewardshipPolicy: config.stewardshipPolicy,
+                pricePerPixelLovelace: price,   // live steward-set price
             });
             return true;
         }

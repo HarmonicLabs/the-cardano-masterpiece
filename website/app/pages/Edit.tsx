@@ -22,7 +22,7 @@ const contains = (o: Rect, i: Rect): boolean =>
     o.x0 <= i.x0 && i.x1 <= o.x1 && o.y0 <= i.y0 && i.y1 <= o.y1;
 
 export function Edit() {
-    const { isConnected, address, api } = useCardanoWallet();
+    const { isConnected, address, api, connectedWallet } = useCardanoWallet();
     const [pixels, setPixels] = useState<Uint8Array | null>(null);
     const [plots, setPlots] = useState<Plot[]>([]);
     const [mode, setMode] = useState<"paint" | "carve">("paint");
@@ -67,7 +67,7 @@ export function Edit() {
         try {
             setBusy("building commit transactions…");
             const txs = await buildCatchupCommitTxs(api, address);
-            const hashes = await signAndSubmitAll(api, txs, setSignProg);
+            const hashes = await signAndSubmitAll(api, txs, setSignProg, connectedWallet?.name);
             setResults(hashes);
             setBusy("waiting for confirmation…");
             await new Promise((r) => setTimeout(r, 30_000));
@@ -189,7 +189,7 @@ export function Edit() {
             setBusy(prebuilt ? "finalizing transactions…" : "building transaction(s)…");
             const txs = await prebuilderRef.current.request(api, address, groups);
             // one chained batch: single CIP-103 prompt when supported
-            const hashes = await signAndSubmitAll(api, txs, setSignProg);
+            const hashes = await signAndSubmitAll(api, txs, setSignProg, connectedWallet?.name);
             setResults(hashes);
             dropImage();
             setBusy("refreshing canvas…");
@@ -244,13 +244,13 @@ export function Edit() {
 
     return (
         <section>
-            <TxProgress p={signProg} />
+            <TxProgress p={signProg} onClose={() => setSignProg(null)} />
             <div className="pagehead">
                 <h2>Studio</h2>
                 <p className="tagline">
                     Your plots are outlined in blue. <b>Paint</b>: import an image, size it, and
                     drag it onto your plots — pixels outside them are ignored.
-                    <b> Carve</b>: select a region of one plot to split its ownership NFT into
+                    <b> Carve</b>: select a region of one plot to split its stewardship NFT into
                     separate deeds you can sell or transfer.
                 </p>
             </div>

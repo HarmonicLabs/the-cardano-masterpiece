@@ -20,9 +20,9 @@ import {
     sortedRefIndex, findUtxoWithAsset, assetAmount, pureAdaUtxo, txBuilder, submitSignedTx, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
+    stewardshipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
     rootDatum, leafDatum, nurseryDatum, initialChunk, freeDatum, lovelacePerPixelDatum,
-    mpMintInit, mpHatch, mpEdit, mpCommit, oMintInit, oMintFree, oOwnerClaim,
+    mpMintInit, mpHatch, mpEdit, mpCommit, oMintInit, oMintFree, oStewardClaim,
     carveComplements, rectName,
     FREE_TOKEN_NAME, PRICE_NFT_NAME, LEAF_NFT_NAME, ROOT_REF_NFT_NAME, ROOT_USER_NFT_NAME,
     N_LEAFS, LINE_LENGTH, MIN_LOVELACE_PER_PIXEL, type Rect,
@@ -62,7 +62,7 @@ const fundRef = dU.find((u) => u.resolved.value.lovelaces === ADA(110))!;
 assert(coll && genesisO && genesisM && genesisO.utxoRef.toString() !== genesisM.utxoRef.toString() && fundRef, "funding");
 
 const bmp = buildBmpHeader();
-const own = ownershipContract(dep.address, genesisO.utxoRef);
+const own = stewardshipContract(dep.address, genesisO.utxoRef);
 const mp = masterpieceContract(own.hash.toBuffer(), genesisM.utxoRef, bmp);
 const lock = lockContract();
 const work = (min: bigint): UTxO => pureAdaUtxo(queryUtxos(dep.address).filter(notRef(coll)).filter(notRef(fundRef)), min)!;
@@ -85,7 +85,7 @@ const refO = atLock.find((u) => u.utxoRef.id.toString() === dO && Number(u.utxoR
 const refM = atLock.find((u) => u.utxoRef.id.toString() === dM && Number(u.utxoRef.index) === 0)!;
 
 // ---------------------------------------------------------------------------
-step("1. ownership init + 2. masterpiece init");
+step("1. stewardship init + 2. masterpiece init");
 {
     const w = work(ADA(200));
     await signSubmitAwait({
@@ -97,7 +97,7 @@ step("1. ownership init + 2. masterpiece init");
             { address: own.address, value: withAda(ADA(3), own.policyHex, [[PRICE_NFT_NAME, 1n]]), datum: lovelacePerPixelDatum(MIN_LOVELACE_PER_PIXEL) },
         ],
         changeAddress: dep.address,
-    }, dep, "ownership-init", own.address);
+    }, dep, "stewardship-init", own.address);
 }
 const initCid = cidV1Raw(initialChunk());
 const initialLeafCids = Array.from({ length: N_LEAFS }, () => initCid);
@@ -119,14 +119,14 @@ const rootD0 = rootDatum(initialLeafCids, bmp);
 }
 
 // ---------------------------------------------------------------------------
-step("3. ownerClaim a column covering leaves 0 & 1 (rows 0..23, col 0)");
+step("3. stewardClaim a column covering leaves 0 & 1 (rows 0..23, col 0)");
 const COL: Rect = { x0: 0, y0: 0, x1: 1, y1: 24 };
 const colName = rectName(COL);
 {
     const freeNode = findUtxoWithAsset(queryUtxos(own.address), own.policyHex, FREE_TOKEN_NAME)!;
     const comps = carveComplements(CANVAS, COL);
     await signSubmitAwait({
-        inputs: [{ utxo: freeNode, referenceScript: { refUtxo: refO, datum: "inline", redeemer: oOwnerClaim(COL) } }, work(ADA(50))],
+        inputs: [{ utxo: freeNode, referenceScript: { refUtxo: refO, datum: "inline", redeemer: oStewardClaim(COL) } }, work(ADA(50))],
         collaterals: [coll],
         requiredSigners: [dep.pkh],
         mints: [{ value: Value.add(Value.singleAsset(new Hash28(own.policyHex), colName, 1n), tokens(own.policyHex, [[FREE_TOKEN_NAME, BigInt(comps.length - 1)]])), script: { ref: refO, redeemer: oMintFree() } }],
@@ -135,7 +135,7 @@ const colName = rectName(COL);
             { address: dep.address, value: withAda(ADA(2), own.policyHex, [[colName, 1n]]) },
         ],
         changeAddress: dep.address,
-    }, dep, "ownerclaim-col", dep.address);
+    }, dep, "stewardclaim-col", dep.address);
 }
 
 // ---------------------------------------------------------------------------

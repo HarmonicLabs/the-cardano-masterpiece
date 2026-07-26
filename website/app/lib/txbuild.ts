@@ -12,10 +12,10 @@ import type { MarketListing, MarketRequest, PixelEdit, Rect } from "./api.js";
 import {
     config, ROWS_PER_LEAF, MIN_LISTING_LOVELACE, MIN_LOVELACE_PER_PIXEL,
     txBuilder, refScripts, walletFunding, walletDeed, marketUtxo, lovelacesOf,
-    freeNodes, priceConfig, isProtocolOwner, tokens, bytesToHex, PRICE_NFT_NAME,
+    freeNodes, priceConfig, isProtocolSteward, tokens, bytesToHex, PRICE_NFT_NAME,
     rectName, rectNameStr, rectArea, rectValid, rectContains, carveComplements, rectUnionIfMergeable,
     freeDatum, listingDatum, requestDatum, txOutRefTag, lovelacePerPixelDatum,
-    oClaim, oOwnerClaim, oMintFree, oMintCarve, oMintMerge, oPriceChange,
+    oClaim, oStewardClaim, oMintFree, oMintCarve, oMintMerge, oPriceChange,
     mBuy, mPartialBuy, mListingCancel, mFill, mRequestCancel,
     asConstr, type FreeNode,
 } from "./chain.js";
@@ -37,7 +37,7 @@ const rectIntersect = (a: Rect, b: Rect): Rect | null => {
 // ---- claim ----------------------------------------------------------------
 
 async function buildOneClaim(
-    outAddr: Address, isOwner: boolean, node: FreeNode, rect: Rect, f: UTxO[], refO: UTxO,
+    outAddr: Address, isSteward: boolean, node: FreeNode, rect: Rect, f: UTxO[], refO: UTxO,
     price: bigint, priceRef: UTxO,
 ): Promise<Tx> {
     const complements = carveComplements(node.rect, rect);
@@ -47,46 +47,46 @@ async function buildOneClaim(
     if (k - 1 !== 0) mintEntries.push([EMPTY_NAME, BigInt(k - 1)]);
 
     const complementOuts = complements.map((r) => ({
-        address: Address.fromString(config.ownershipAddress),
-        value: Value.add(Value.lovelaces(3_000_000n), tokens(config.ownershipPolicy, [[EMPTY_NAME, 1n]])),
+        address: Address.fromString(config.stewardshipAddress),
+        value: Value.add(Value.lovelaces(3_000_000n), tokens(config.stewardshipPolicy, [[EMPTY_NAME, 1n]])),
         datum: freeDatum(r),
     }));
     const deedOut = {
         address: outAddr,
-        value: Value.add(Value.lovelaces(2_000_000n), tokens(config.ownershipPolicy, [[deedName, 1n]])),
+        value: Value.add(Value.lovelaces(2_000_000n), tokens(config.stewardshipPolicy, [[deedName, 1n]])),
     };
 
-    // The protocol owner claims free space for free via the dedicated
-    // `ownerClaim` redeemer: no payment output, the owner signs, and EVERY
-    // non-contract output (deed + change) must go to the protocol owner.
+    // The protocol steward claims free space for free via the dedicated
+    // `stewardClaim` redeemer: no payment output, the steward signs, and EVERY
+    // non-contract output (deed + change) must go to the protocol steward.
     return (await txBuilder()).build({
         inputs: [
             {
                 utxo: node.utxo,
                 referenceScript: {
                     refUtxo: refO, datum: "inline",
-                    redeemer: isOwner ? oOwnerClaim(rect) : oClaim(rect),
+                    redeemer: isSteward ? oStewardClaim(rect) : oClaim(rect),
                 },
             },
             ...f,
         ],
-        // non-owner claims reference the price config (NFT-validated) to prove
-        // the payment matches the current owner-set price; owner claims are free
-        ...(isOwner
+        // non-steward claims reference the price config (NFT-validated) to prove
+        // the payment matches the current steward-set price; steward claims are free
+        ...(isSteward
             ? { requiredSigners: [outAddr.paymentCreds.hash] }
             : { readonlyRefInputs: [priceRef] }),
         mints: [{
-            value: tokens(config.ownershipPolicy, mintEntries),
+            value: tokens(config.stewardshipPolicy, mintEntries),
             script: { ref: refO, redeemer: oMintFree() },
         }],
-        outputs: isOwner
+        outputs: isSteward
             ? [...complementOuts, deedOut]
             : [
                 ...complementOuts,
-                { address: Address.fromString(config.protocolOwnerAddress), value: Value.lovelaces(price) },
+                { address: Address.fromString(config.protocolStewardAddress), value: Value.lovelaces(price) },
                 deedOut,
             ],
-        metadata: deedCip25(config.ownershipPolicy, [rect]),
+        metadata: deedCip25(config.stewardshipPolicy, [rect]),
         changeAddress: outAddr,
     });
 }
@@ -97,7 +97,7 @@ function deedUtxoOf(tx: Tx, rect: Rect, addr: Address): UTxO {
     const outs = tx.body.outputs;
     for (let i = 0; i < outs.length; i++) {
         if (outs[i].address.toString() !== addr.toString()) continue;
-        const assets = (outs[i].value.toJson() as Record<string, Record<string, unknown>>)[config.ownershipPolicy];
+        const assets = (outs[i].value.toJson() as Record<string, Record<string, unknown>>)[config.stewardshipPolicy];
         if (assets && assets[nameHex] !== undefined)
             return new UTxO({ utxoRef: new TxOutRef({ id: tx.hash.toString(), index: i }), resolved: outs[i] });
     }
@@ -133,12 +133,12 @@ export async function buildClaimTxs(
 ): Promise<string[]> {
     if (!rectValid(rect)) throw new Error("invalid rect");
     const userAddr = Address.fromString(address);
-    // if the connected wallet is the protocol owner, claim for free via
-    // `ownerClaim`; the contract requires all non-contract outputs (deed +
-    // change) to be the canonical protocol-owner address, so use that.
-    const ownerAddr = Address.fromString(config.protocolOwnerAddress);
-    const isOwner = userAddr.paymentCreds.hash.toString() === ownerAddr.paymentCreds.hash.toString();
-    const outAddr = isOwner ? ownerAddr : userAddr;
+    // if the connected wallet is the protocol steward, claim for free via
+    // `stewardClaim`; the contract requires all non-contract outputs (deed +
+    // change) to be the canonical protocol-steward address, so use that.
+    const stewardAddr = Address.fromString(config.protocolStewardAddress);
+    const isSteward = userAddr.paymentCreds.hash.toString() === stewardAddr.paymentCreds.hash.toString();
+    const outAddr = isSteward ? stewardAddr : userAddr;
 
     const nodes = await freeNodes();
     const parts = nodes
@@ -151,14 +151,14 @@ export async function buildClaimTxs(
 
     const editGroups = sprite ? spriteLeafGroups(sprite) : [];
 
-    // the current owner-set price, read from the NFT-validated config node;
-    // non-owner claims reference it and pay accordingly
+    // the current steward-set price, read from the NFT-validated config node;
+    // non-steward claims reference it and pay accordingly
     const { utxo: priceRef, pricePerPixel } = await priceConfig();
 
     // funding must cover the WHOLE chain (change threads through every tx): each
     // claim's price + complement/deed min-adas, plus per-leaf edit fees
     const claimCost = parts.reduce((s, { node, part }) => {
-        const price = isOwner ? 0n : rectArea(part) * pricePerPixel;
+        const price = isSteward ? 0n : rectArea(part) * pricePerPixel;
         const comps = BigInt(carveComplements(node.rect, part).length);
         return s + price + comps * 3_000_000n + 2_000_000n;   // complements (3₳) + deed (2₳)
     }, 0n);
@@ -172,8 +172,8 @@ export async function buildClaimTxs(
     const claimPlots: Plot[] = [];
     for (let i = 0; i < parts.length; i++) {
         const { node, part } = parts[i];
-        const price = isOwner ? 0n : rectArea(part) * pricePerPixel;
-        const tx = await buildOneClaim(outAddr, isOwner, node, part, f, refO, price, priceRef);
+        const price = isSteward ? 0n : rectArea(part) * pricePerPixel;
+        const tx = await buildOneClaim(outAddr, isSteward, node, part, f, refO, price, priceRef);
         txs.push(tx);
         claimPlots.push({ rect: part, name: rectNameStr(part), utxo: deedUtxoOf(tx, part, outAddr) });
         // thread change to the next claim, or (on the last claim) to the edits
@@ -195,16 +195,16 @@ export async function buildClaimTxs(
 }
 
 /**
- * Protocol-owner: retune the price per pixel. Spends the price-config node
- * (LovelacePerPixel state) and re-creates it at the ownership script with the
- * price NFT preserved and the new value. The contract checks the owner's
- * signature and the floor; only the owner's wallet can produce that signature.
+ * Protocol-steward: retune the price per pixel. Spends the price-config node
+ * (LovelacePerPixel state) and re-creates it at the stewardship script with the
+ * price NFT preserved and the new value. The contract checks the steward's
+ * signature and the floor; only the steward's wallet can produce that signature.
  */
 export async function buildSetPriceTx(api: WalletApi, address: string, newPricePerPixel: bigint): Promise<string> {
-    if (!isProtocolOwner(address)) throw new Error("only the protocol owner can change the price");
+    if (!isProtocolSteward(address)) throw new Error("only the protocol steward can change the price");
     if (newPricePerPixel < MIN_LOVELACE_PER_PIXEL) throw new Error("price must be at least 1 ADA per pixel");
     const userAddr = Address.fromString(address);
-    const ownerAddr = Address.fromString(config.protocolOwnerAddress);
+    const stewardAddr = Address.fromString(config.protocolStewardAddress);
     const { utxo: cfg } = await priceConfig();
     const { refO } = await refScripts();
     const f = await walletFunding(api, [cfg.utxoRef.toString()]);
@@ -213,10 +213,10 @@ export async function buildSetPriceTx(api: WalletApi, address: string, newPriceP
             { utxo: cfg, referenceScript: { refUtxo: refO, datum: "inline", redeemer: oPriceChange() } },
             ...f,
         ],
-        requiredSigners: [ownerAddr.paymentCreds.hash],
+        requiredSigners: [stewardAddr.paymentCreds.hash],
         outputs: [{
-            address: Address.fromString(config.ownershipAddress),
-            value: Value.add(Value.lovelaces(lovelacesOf(cfg)), tokens(config.ownershipPolicy, [[PRICE_NFT_NAME, 1n]])),
+            address: Address.fromString(config.stewardshipAddress),
+            value: Value.add(Value.lovelaces(lovelacesOf(cfg)), tokens(config.stewardshipPolicy, [[PRICE_NFT_NAME, 1n]])),
             datum: lovelacePerPixelDatum(newPricePerPixel),
         }],
         changeAddress: userAddr,
@@ -249,13 +249,13 @@ export async function buildCatchupCommitTxs(api: WalletApi, address: string): Pr
     return txs.map(toHex);
 }
 
-// ---- carve (split ownership) ----------------------------------------------
+// ---- carve (split stewardship) ----------------------------------------------
 
 /**
  * Split an owned deed into a sub-rect `target` + its ≤4 guillotine complements,
- * ALL minted back to the owner (unlike a marketplace partial-buy, where `target`
+ * ALL minted back to the steward (unlike a marketplace partial-buy, where `target`
  * goes to the buyer). Burns the parent deed and mints the pieces in one tx via
- * the ownership `carve` redeemer — the pieces can then be listed/sold/edited
+ * the stewardship `carve` redeemer — the pieces can then be listed/sold/edited
  * independently. Consent is inherent in spending the parent from the wallet.
  */
 export async function buildCarveTx(
@@ -281,15 +281,15 @@ export async function buildCarveTx(
     return toHex(await (await txBuilder()).build({
         inputs: [deedU, ...f],
         mints: [{
-            value: tokens(config.ownershipPolicy, mintEntries),
+            value: tokens(config.stewardshipPolicy, mintEntries),
             script: { ref: refO, redeemer: oMintCarve(parent, target) },
         }],
         outputs: pieces.map((r) => ({
             address: userAddr,
-            value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(r), 1n]])),
+            value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(r), 1n]])),
         })),
         // CIP-25 artwork for every piece this carve mints
-        metadata: deedCip25(config.ownershipPolicy, pieces),
+        metadata: deedCip25(config.stewardshipPolicy, pieces),
         changeAddress: userAddr,
     }));
 }
@@ -308,7 +308,7 @@ export async function buildMarketListTx(api: WalletApi, address: string, name: s
         inputs: [deedU, ...f],
         outputs: [{
             address: Address.fromString(config.marketplaceAddress),
-            value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(rect), 1n]])),
+            value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(rect), 1n]])),
             datum: listingDatum(userAddr, pricePerPixel),
         }],
         changeAddress: userAddr,
@@ -327,10 +327,52 @@ export async function buildMarketBuyTx(api: WalletApi, address: string, l: Marke
         ],
         outputs: [
             { address: Address.fromString(l.seller), value: Value.lovelaces(BigInt(l.priceTotal)), datum: txOutRefTag(listingU.utxoRef) },
-            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(l.rect), 1n]])) },
+            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(l.rect), 1n]])) },
         ],
         changeAddress: userAddr,
     }));
+}
+
+/** buy several WHOLE listings in ONE chained batch — sign via signAndSubmitAll */
+export async function buildMarketBuyTxs(api: WalletApi, address: string, listings: MarketListing[]): Promise<string[]> {
+    const outAddr = Address.fromString(address);
+    let target = MIN_LISTING_LOVELACE * BigInt(listings.length);        // one deed min-ada each
+    for (const l of listings) target += BigInt(l.priceTotal);
+    target += BigInt(listings.length + 1) * 2_000_000n;                 // fee headroom
+    let f = await walletFunding(api, [], target);
+    const txs: Tx[] = [];
+    for (const l of listings) {
+        const listingU = await marketUtxo(l.utxoRef);
+        const tx = await buildOneBuy(outAddr, l, listingU, f);
+        txs.push(tx);
+        f = [chainChange(tx, outAddr)];
+    }
+    return txs.map(toHex);
+}
+
+/** cancel several of YOUR OWN orders (listings and/or requests) in one chained batch */
+export async function buildMarketCancelTxs(api: WalletApi, address: string, utxoRefs: string[]): Promise<string[]> {
+    const userAddr = Address.fromString(address);
+    const { refK } = await refScripts();
+    let f = await walletFunding(api, [], BigInt(utxoRefs.length + 1) * 2_000_000n);
+    const txs: Tx[] = [];
+    for (const ref of utxoRefs) {
+        const orderU = await marketUtxo(ref);
+        const d = asConstr(orderU.resolved.datum);
+        const steward = Address.fromData(d.fields[0] as Parameters<typeof Address.fromData>[0], "testnet");
+        if (steward.paymentCreds.hash.toString() !== userAddr.paymentCreds.hash.toString())
+            throw new Error("only the order's steward can cancel it");
+        const redeemer = Number(d.constr) === 0 ? mListingCancel() : mRequestCancel();
+        const tx = await (await txBuilder()).build({
+            inputs: [{ utxo: orderU, referenceScript: { refUtxo: refK, datum: "inline", redeemer } }, ...f],
+            requiredSigners: [userAddr.paymentCreds.hash],
+            outputs: [{ address: userAddr, value: orderU.resolved.value }],
+            changeAddress: userAddr,
+        });
+        txs.push(tx);
+        f = [chainChange(tx, userAddr)];
+    }
+    return txs.map(toHex);
 }
 
 export async function buildMarketPartialBuyTx(api: WalletApi, address: string, l: MarketListing, bought: Rect): Promise<string> {
@@ -356,21 +398,21 @@ export async function buildMarketPartialBuyTx(api: WalletApi, address: string, l
             ...f,
         ],
         mints: [{
-            value: tokens(config.ownershipPolicy, mintEntries),
+            value: tokens(config.stewardshipPolicy, mintEntries),
             script: { ref: refO, redeemer: oMintCarve(parent, bought) },
         }],
         outputs: [
             // complements relisted on the SAME terms: reuse the original datum
             ...comps.map((c) => ({
                 address: Address.fromString(config.marketplaceAddress),
-                value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(c), 1n]])),
+                value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(c), 1n]])),
                 datum: asConstr(listingU.resolved.datum),
             })),
             { address: Address.fromString(l.seller), value: Value.lovelaces(BigInt(l.pricePerPixel) * rectArea(bought)), datum: txOutRefTag(listingU.utxoRef) },
-            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(bought), 1n]])) },
+            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(bought), 1n]])) },
         ],
         // CIP-25 artwork for every deed this carve mints (bought + complements)
-        metadata: deedCip25(config.ownershipPolicy, [bought, ...comps]),
+        metadata: deedCip25(config.stewardshipPolicy, [bought, ...comps]),
         changeAddress: userAddr,
     }));
 }
@@ -385,7 +427,7 @@ async function buildOneBuy(outAddr: Address, l: MarketListing, listingU: UTxO, f
         inputs: [{ utxo: listingU, referenceScript: { refUtxo: refK, datum: "inline", redeemer: mBuy(l.rect) } }, ...f],
         outputs: [
             { address: Address.fromString(l.seller), value: Value.lovelaces(BigInt(l.priceTotal)), datum: txOutRefTag(listingU.utxoRef) },
-            { address: outAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(l.rect), 1n]])) },
+            { address: outAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(l.rect), 1n]])) },
         ],
         changeAddress: outAddr,
     });
@@ -403,17 +445,17 @@ async function buildOnePartialBuy(outAddr: Address, l: MarketListing, bought: Re
     ];
     return (await txBuilder()).build({
         inputs: [{ utxo: listingU, referenceScript: { refUtxo: refK, datum: "inline", redeemer: mPartialBuy(parent, bought) } }, ...f],
-        mints: [{ value: tokens(config.ownershipPolicy, mintEntries), script: { ref: refO, redeemer: oMintCarve(parent, bought) } }],
+        mints: [{ value: tokens(config.stewardshipPolicy, mintEntries), script: { ref: refO, redeemer: oMintCarve(parent, bought) } }],
         outputs: [
             ...comps.map((c) => ({
                 address: Address.fromString(config.marketplaceAddress),
-                value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(c), 1n]])),
+                value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(c), 1n]])),
                 datum: asConstr(listingU.resolved.datum),   // same seller + price
             })),
             { address: Address.fromString(l.seller), value: Value.lovelaces(BigInt(l.pricePerPixel) * rectArea(bought)), datum: txOutRefTag(listingU.utxoRef) },
-            { address: outAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(bought), 1n]])) },
+            { address: outAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(bought), 1n]])) },
         ],
-        metadata: deedCip25(config.ownershipPolicy, [bought, ...comps]),
+        metadata: deedCip25(config.stewardshipPolicy, [bought, ...comps]),
         changeAddress: outAddr,
     });
 }
@@ -424,11 +466,11 @@ async function buildOneMerge(outAddr: Address, a: Piece, b: Piece, union: Rect, 
     return (await txBuilder()).build({
         inputs: [a.utxo, b.utxo, ...f],
         mints: [{
-            value: tokens(config.ownershipPolicy, [[rectName(a.rect), -1n], [rectName(b.rect), -1n], [rectName(union), 1n]]),
+            value: tokens(config.stewardshipPolicy, [[rectName(a.rect), -1n], [rectName(b.rect), -1n], [rectName(union), 1n]]),
             script: { ref: refO, redeemer: oMintMerge(a.rect, b.rect) },
         }],
-        outputs: [{ address: outAddr, value: Value.add(Value.lovelaces(2_000_000n), tokens(config.ownershipPolicy, [[rectName(union), 1n]])) }],
-        metadata: deedCip25(config.ownershipPolicy, [union]),
+        outputs: [{ address: outAddr, value: Value.add(Value.lovelaces(2_000_000n), tokens(config.stewardshipPolicy, [[rectName(union), 1n]])) }],
+        metadata: deedCip25(config.stewardshipPolicy, [union]),
         changeAddress: outAddr,
     });
 }
@@ -449,9 +491,9 @@ export async function buildAcquireTxs(
 ): Promise<string[]> {
     if (!rectValid(rect)) throw new Error("invalid rect");
     const userAddr = Address.fromString(address);
-    const ownerAddr = Address.fromString(config.protocolOwnerAddress);
-    const isOwner = userAddr.paymentCreds.hash.toString() === ownerAddr.paymentCreds.hash.toString();
-    const outAddr = isOwner ? ownerAddr : userAddr;
+    const stewardAddr = Address.fromString(config.protocolStewardAddress);
+    const isSteward = userAddr.paymentCreds.hash.toString() === stewardAddr.paymentCreds.hash.toString();
+    const outAddr = isSteward ? stewardAddr : userAddr;
 
     // tile the selection into free + listed rectangles (they never overlap, so
     // exact area coverage ⇒ a clean tiling; any shortfall = unavailable pixels)
@@ -473,7 +515,7 @@ export async function buildAcquireTxs(
     // funding: claim payments + buy payments + relisted-comp/deed min-adas + fees
     let target = 0n;
     for (const { node, part } of freeParts)
-        target += (isOwner ? 0n : rectArea(part) * pricePerPixel)
+        target += (isSteward ? 0n : rectArea(part) * pricePerPixel)
             + BigInt(carveComplements(node.rect, part).length) * 3_000_000n + 2_000_000n;
     for (const { l, part } of listedParts)
         target += BigInt(l.pricePerPixel) * rectArea(part)
@@ -485,8 +527,8 @@ export async function buildAcquireTxs(
     let pieces: Piece[] = [];
 
     for (const { node, part } of freeParts) {
-        const price = isOwner ? 0n : rectArea(part) * pricePerPixel;
-        const tx = await buildOneClaim(outAddr, isOwner, node, part, f, refO, price, priceRef);
+        const price = isSteward ? 0n : rectArea(part) * pricePerPixel;
+        const tx = await buildOneClaim(outAddr, isSteward, node, part, f, refO, price, priceRef);
         txs.push(tx); pieces.push({ rect: part, utxo: deedUtxoOf(tx, part, outAddr) });
         f = [chainChange(tx, outAddr)];
     }
@@ -539,9 +581,9 @@ export async function buildMarketCancelTx(api: WalletApi, address: string, utxoR
     const userAddr = Address.fromString(address);
     const orderU = await marketUtxo(utxoRef);
     const d = asConstr(orderU.resolved.datum);
-    const owner = Address.fromData(d.fields[0] as Parameters<typeof Address.fromData>[0], "testnet");
-    if (owner.paymentCreds.hash.toString() !== userAddr.paymentCreds.hash.toString())
-        throw new Error("only the order's owner can cancel it");
+    const steward = Address.fromData(d.fields[0] as Parameters<typeof Address.fromData>[0], "testnet");
+    if (steward.paymentCreds.hash.toString() !== userAddr.paymentCreds.hash.toString())
+        throw new Error("only the order's steward can cancel it");
     const redeemer = Number(d.constr) === 0 ? mListingCancel() : mRequestCancel();
     const { refK } = await refScripts();
     const f = await walletFunding(api);
@@ -590,7 +632,7 @@ export async function buildMarketFillTx(api: WalletApi, address: string, r: Mark
             ...f,
         ],
         outputs: [
-            { address: Address.fromString(r.requester), value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(r.rect), 1n]])) },
+            { address: Address.fromString(r.requester), value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(r.rect), 1n]])) },
         ],
         changeAddress: userAddr,
     }));

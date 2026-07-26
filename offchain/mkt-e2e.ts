@@ -3,7 +3,7 @@
 //
 //  Full lifecycle, all scripts INLINE (no reference deploys needed):
 //    0. fund seller + buyer from genesis
-//    1. ownership init            (fresh instance, protocolOwner = seller)
+//    1. stewardship init            (fresh instance, protocolSteward = seller)
 //    2. seller claims a deed      (10,10)-(20,20), pays 5 ada/px to itself
 //    3. seller lists it           1 ada per pixel
 //    4. buyer partialBuy INNER    (12,13)-(17,18): carve composes ON-CHAIN,
@@ -19,7 +19,7 @@ import {
     sortedRefIndex, findUtxoWithAsset, assetAmount, pureAdaUtxo, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, marketplaceContract, lockContract, lockedDatum, freeDatum, listingDatum, requestDatum,
+    stewardshipContract, marketplaceContract, lockContract, lockedDatum, freeDatum, listingDatum, requestDatum,
     oMintInit, oMintFree, oMintCarve, oMintMerge, oClaim, mBuy, mPartialBuy, mListingCancel,
     mFill, mRequestCancel, mRecover, carveComplements, rectName, rectArea, txOutRefData,
     FREE_TOKEN_NAME, type Rect,
@@ -37,7 +37,7 @@ const seller: Wallet = ensureWallet(`mkt-seller-${Date.now()}`);
 const buyer: Wallet = ensureWallet(`mkt-buyer-${Date.now()}`);
 const fundTx = fundFromGenesis([
     { address: seller.address, lovelace: ADA(10) },   // collateral
-    { address: seller.address, lovelace: ADA(50) },   // ownership genesis utxo
+    { address: seller.address, lovelace: ADA(50) },   // stewardship genesis utxo
     { address: seller.address, lovelace: ADA(600) },  // funds
     { address: seller.address, lovelace: ADA(70) },   // ref-script deploys
     { address: buyer.address, lovelace: ADA(10) },    // collateral
@@ -52,14 +52,14 @@ console.log("  seller:", seller.address.toString());
 console.log("  buyer :", buyer.address.toString());
 
 // ---------------------------------------------------------------------------
-// contracts: fresh ownership instance + marketplace over its policy
+// contracts: fresh stewardship instance + marketplace over its policy
 // ---------------------------------------------------------------------------
-const own = ownershipContract(seller.address, genesisU.utxoRef);
+const own = stewardshipContract(seller.address, genesisU.utxoRef);
 const market = marketplaceContract(own.hash.toBuffer());
 const deed = (r: Rect, n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), rectName(r), n);
 const marker = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), FREE_TOKEN_NAME, n);
 const withAda = (l: bigint, v: Value): Value => Value.add(Value.lovelaces(l), v);
-console.log("  ownership  :", own.policyHex);
+console.log("  stewardship  :", own.policyHex);
 console.log("  marketplace:", market.policyHex);
 
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ const noDeployRefs = (u: { utxoRef: { toString(): string } }): boolean =>
     u.utxoRef.toString() !== refO.utxoRef.toString() && u.utxoRef.toString() !== refK.utxoRef.toString();
 
 // ---------------------------------------------------------------------------
-step("1. ownership init");
+step("1. stewardship init");
 {
     const gIdx = sortedRefIndex([genesisU.utxoRef, sellerFunds.utxoRef], genesisU.utxoRef);
     await signSubmitAwait({
@@ -101,7 +101,7 @@ step("1. ownership init");
             datum: freeDatum({ x0: 0, y0: 0, x1: 1024, y1: 1022 }),
         }],
         changeAddress: seller.address,
-    }, seller, "ownership-init", own.address);
+    }, seller, "stewardship-init", own.address);
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ const claimComps = carveComplements({ x0: 0, y0: 0, x1: 1024, y1: 1022 }, deedRe
         }],
         outputs: [
             ...claimComps.map((r) => ({ address: own.address, value: withAda(ADA(3), marker(1n)), datum: freeDatum(r) })),
-            { address: seller.address, value: Value.lovelaces(ADA(500)) }, // 5 ada/px to protocolOwner (= seller)
+            { address: seller.address, value: Value.lovelaces(ADA(500)) }, // 5 ada/px to protocolSteward (= seller)
             { address: seller.address, value: withAda(ADA(2), deed(deedRect, 1n)) },
         ],
         changeAddress: seller.address,

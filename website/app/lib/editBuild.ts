@@ -33,12 +33,12 @@ export function chainChange(tx: Tx, userAddr: Address): UTxO {
     });
 }
 
-/** the deeds (ownership plots) among a known set of wallet utxos */
+/** the deeds (stewardship plots) among a known set of wallet utxos */
 export function walletPlotsFrom(utxos: UTxO[]): Plot[] {
     const plots: Plot[] = [];
     for (const u of utxos) {
         const j = u.resolved.value.toJson() as Record<string, Record<string, unknown>>;
-        const assets = j[config.ownershipPolicy];
+        const assets = j[config.stewardshipPolicy];
         if (!assets) continue;
         for (const nameHex of Object.keys(assets)) {
             const name = new TextDecoder().decode(
@@ -76,7 +76,7 @@ export async function buildOneEdit(
     // skip — an edit tx that re-locks the identical chunk just wastes fees
     if (!changed) return null;
 
-    const ownerRects = plots
+    const stewardRects = plots
         .filter((p) => touched.has(p.name))
         .map((p) => p.rect)
         .sort((a, b) => a.x0 - b.x0);
@@ -88,7 +88,7 @@ export async function buildOneEdit(
     const newCid = cidV1Raw(newChunk);
     const tx = await (await txBuilder()).build({
         inputs: [
-            { utxo: leaf.utxo, referenceScript: { refUtxo: refM, datum: "inline", redeemer: mpEdit(ownerRects) } },
+            { utxo: leaf.utxo, referenceScript: { refUtxo: refM, datum: "inline", redeemer: mpEdit(stewardRects) } },
             ...f,
         ],
         readonlyRefInputs: deedUtxos,

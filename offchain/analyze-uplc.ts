@@ -65,7 +65,7 @@ const builtinName = ( tag: string ): string => ( UPLCBuiltinTag as any )[ Number
 
 const pairs: [string, string, string][] = [
     [ "marketplace", "marketplace", "marketplace.marketplace.spend" ],
-    [ "ownership",   "ownership",   "ownership.ownership.mint" ],
+    [ "stewardship",   "stewardship",   "stewardship.stewardship.mint" ],
     [ "masterpiece", "masterpiece", "masterpiece.masterpiece.mint" ],
 ];
 

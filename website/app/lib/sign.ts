@@ -30,6 +30,29 @@ function bulkSigner(api: WalletApi): SignTxsFn | undefined {
  *  used to decide whether to append the extra (chained) merge txs */
 export const hasBulkSigner = (api: WalletApi): boolean => bulkSigner(api) !== undefined;
 
+// Some wallets (notably recent Eternl) only attach `signTxs` when the CIP-103
+// extension is requested at enable() time. The wallet hook calls a bare
+// `enable()`, so the cached `api` may lack it even though the wallet supports
+// bulk signing. If the current api has no bulk signer, try re-enabling the named
+// wallet WITH the extension and use that handle's signTxs. Re-enable on an
+// already-connected wallet resolves without a fresh prompt; on any failure we
+// fall back to the one-prompt-per-tx path (unchanged behaviour).
+async function resolveBulkSigner(api: WalletApi, walletName?: string): Promise<SignTxsFn | undefined> {
+    const direct = bulkSigner(api);
+    if (direct) return direct;
+    if (!walletName || typeof window === "undefined") return undefined;
+    const provider = (window as unknown as {
+        cardano?: Record<string, { enable?: (opts?: unknown) => Promise<WalletApi> }>;
+    }).cardano?.[walletName];
+    if (typeof provider?.enable !== "function") return undefined;
+    try {
+        const fresh = await provider.enable({ extensions: [{ cip: 103 }] });
+        return bulkSigner(fresh);
+    } catch {
+        return undefined;   // extension unsupported / user declined — one-by-one it is
+    }
+}
+
 // ---- progress reporting (drives the signing modal) -------------------------
 export type SignPhase = "signing" | "submitting" | "confirming" | "done";
 export interface SignProgress {
@@ -65,6 +88,7 @@ export async function signAndSubmitAll(
     api: WalletApi,
     txs: string[],
     onProgress?: (p: SignProgress) => void,
+    walletName?: string,
 ): Promise<string[]> {
     const total = txs.length;
     const hashes: string[] = [];
@@ -82,7 +106,7 @@ export async function signAndSubmitAll(
         return hashes;
     }
 
-    const bulk = bulkSigner(api);
+    const bulk = await resolveBulkSigner(api, walletName);
     if (bulk) {
         report(0, "signing", true);   // whole chain, one prompt
         const witnesses = await bulk(txs.map((cbor) => ({ cbor, partialSign: true })));

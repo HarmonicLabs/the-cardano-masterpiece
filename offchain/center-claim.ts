@@ -14,7 +14,7 @@ import {
     sortedRefIndex, findUtxoWithAsset, pureAdaUtxo, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, marketplaceContract, lockContract, lockedDatum,
+    stewardshipContract, marketplaceContract, lockContract, lockedDatum,
     freeDatum, lovelacePerPixelDatum, listingDatum, oMintInit, oMintFree, oMintCarve, oClaim,
     mPartialBuy, carveComplements, rectName, rectArea, txOutRefData,
     FREE_TOKEN_NAME, PRICE_NFT_NAME, LOVELACE_PER_PIXEL, type Rect,
@@ -42,7 +42,7 @@ const seller: Wallet = ensureWallet(`ctr-seller-${Date.now()}`);
 const buyer: Wallet = ensureWallet(`ctr-buyer-${Date.now()}`);
 const fundTx = fundFromGenesis([
     { address: seller.address, lovelace: ADA(10) },        // collateral
-    { address: seller.address, lovelace: ADA(50) },        // ownership genesis utxo
+    { address: seller.address, lovelace: ADA(50) },        // stewardship genesis utxo
     { address: seller.address, lovelace: ADA(340_000) },   // claim funds (327,680 returns to self)
     { address: seller.address, lovelace: ADA(70) },        // ref-script deploys
     { address: seller.address, lovelace: ADA(20) },        // list funds
@@ -56,13 +56,13 @@ const genesisU = sellerU.find((u) => u.resolved.value.lovelaces === ADA(50))!;
 console.log("  seller:", seller.address.toString());
 console.log("  buyer :", buyer.address.toString());
 
-const own = ownershipContract(seller.address, genesisU.utxoRef);
+const own = stewardshipContract(seller.address, genesisU.utxoRef);
 const market = marketplaceContract(own.hash.toBuffer());
 const deed = (r: Rect, n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), rectName(r), n);
 const marker = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), FREE_TOKEN_NAME, n);
 const priceTok = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), PRICE_NFT_NAME, n);
 const withAda = (l: bigint, v: Value): Value => Value.add(Value.lovelaces(l), v);
-console.log("  ownership  :", own.policyHex);
+console.log("  stewardship  :", own.policyHex);
 console.log("  marketplace:", market.policyHex);
 
 // ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ const noDeployRefs = (u: { utxoRef: { toString(): string } }): boolean =>
     u.utxoRef.toString() !== refO.utxoRef.toString() && u.utxoRef.toString() !== refK.utxoRef.toString();
 
 // ---------------------------------------------------------------------------
-step("1. ownership init");
+step("1. stewardship init");
 {
     const funds = pureAdaUtxo(queryUtxos(seller.address).filter(noDeployRefs).filter(notRef(sellerColl)), ADA(20))!;
     const gIdx = sortedRefIndex([genesisU.utxoRef, funds.utxoRef], genesisU.utxoRef);
@@ -97,7 +97,7 @@ step("1. ownership init");
             { address: own.address, value: withAda(ADA(3), priceTok(1n)), datum: lovelacePerPixelDatum(LOVELACE_PER_PIXEL) },
         ],
         changeAddress: seller.address,
-    }, seller, "ownership-init", own.address);
+    }, seller, "stewardship-init", own.address);
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ const claimComps = carveComplements(CANVAS, square256); // top, bottom, left, ri
         }],
         outputs: [
             ...claimComps.map((r) => ({ address: own.address, value: withAda(ADA(3), marker(1n)), datum: freeDatum(r) })),
-            { address: seller.address, value: Value.lovelaces(claimCost) }, // 5 ada/px to protocolOwner (= seller)
+            { address: seller.address, value: Value.lovelaces(claimCost) }, // 5 ada/px to protocolSteward (= seller)
             { address: seller.address, value: withAda(ADA(2), deed(square256, 1n)) },
         ],
         changeAddress: seller.address,

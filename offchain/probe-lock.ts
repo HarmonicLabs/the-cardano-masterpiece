@@ -10,7 +10,7 @@ import { BlockfrostPluts } from "@harmoniclabs/blockfrost-pluts";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lockContract, lockedDatum, ownershipContract } from "./contracts.ts";
+import { lockContract, lockedDatum, stewardshipContract } from "./contracts.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(readFileSync(join(__dirname, "..", "website", "config.json"), "utf8"));
@@ -26,7 +26,7 @@ const u = (address: Address, value: Value, datum?: DataConstr, refScript?: impor
     new UTxO({ utxoRef: new TxOutRef({ id: (++refN).toString(16).padStart(64, "0"), index: 0 }), resolved: new TxOut({ address, value, datum, refScript }) });
 
 // a parked ref-script utxo, exactly as the deployments will look
-const own = ownershipContract(attacker, new TxOutRef({ id: "00".repeat(32), index: 0 }));
+const own = stewardshipContract(attacker, new TxOutRef({ id: "00".repeat(32), index: 0 }));
 const parkedRef = u(lock.address, Value.lovelaces(ADA(40)), lockedDatum(), own.script);
 const lockedPlain = u(lock.address, Value.lovelaces(ADA(5)), lockedDatum());
 const lockedGarbage = u(lock.address, Value.lovelaces(ADA(5)), new DataConstr(7, [new DataI(1)]));

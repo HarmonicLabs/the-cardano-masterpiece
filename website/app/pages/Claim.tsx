@@ -7,7 +7,7 @@ import {
     type CanvasStateInfo, type FreeArea, type MarketListing, type Rect,
 } from "../lib/api.ts";
 import { buildAcquireTxs, buildSetPriceTx } from "../lib/txbuild.ts";
-import { CANVAS_W as W, CANVAS_H as H, isProtocolOwner } from "../lib/chain.ts";
+import { CANVAS_W as W, CANVAS_H as H, isProtocolSteward } from "../lib/chain.ts";
 import { signAndSubmit, signAndSubmitAll, hasBulkSigner, type SignProgress } from "../lib/sign.ts";
 import { TxProgress } from "../components/TxProgress.tsx";
 import {
@@ -30,7 +30,7 @@ const contains = (o: Rect, i: Rect): boolean =>
     o.x0 <= i.x0 && i.x1 <= o.x1 && o.y0 <= i.y0 && i.y1 <= o.y1;
 
 export function Claim() {
-    const { isConnected, address, api } = useCardanoWallet();
+    const { isConnected, address, api, connectedWallet } = useCardanoWallet();
     const [pixels, setPixels] = useState<Uint8Array | null>(null);
     const [free, setFree] = useState<FreeArea[]>([]);
     const [listings, setListings] = useState<MarketListing[]>([]);
@@ -42,7 +42,7 @@ export function Claim() {
     const [newPriceAda, setNewPriceAda] = useState("");
     const [signProg, setSignProg] = useState<SignProgress | null>(null);
 
-    const isOwner = address != null && isProtocolOwner(address);
+    const isSteward = address != null && isProtocolSteward(address);
     async function setPrice() {
         if (!api || !address) return;
         const ada = Number(newPriceAda);
@@ -231,12 +231,12 @@ export function Claim() {
     const listedCover = claimRect ? listings.reduce((s, l) => s + intersectArea(l.rect, claimRect), 0) : 0;
     const buyable = claimRect != null && freeCover + listedCover === area(claimRect);
     const fullyFree = claimRect != null && listedCover === 0 && freeCover === area(claimRect);
-    // the protocol owner claims free space at no cost; buying LISTED plots still
-    // costs the seller's price (even for the owner)
-    const ownerFree = fullyFree && isOwner;
+    // the protocol steward claims free space at no cost; buying LISTED plots still
+    // costs the seller's price (even for the steward)
+    const stewardFree = fullyFree && isSteward;
     const price = !buyable || claimRect == null ? null : (() => {
-        const ownerPP = state != null ? BigInt(state.pricePerPixelLovelace) : 0n;
-        let total = isOwner ? 0n : BigInt(freeCover) * ownerPP;         // the free portion
+        const stewardPP = state != null ? BigInt(state.pricePerPixelLovelace) : 0n;
+        let total = isSteward ? 0n : BigInt(freeCover) * stewardPP;         // the free portion
         for (const l of listings) {                                     // the listed portions
             const ia = intersectArea(l.rect, claimRect);
             if (ia > 0) total += BigInt(ia) * BigInt(l.pricePerPixel);
@@ -258,7 +258,7 @@ export function Claim() {
             // claim the free parts + buy the listed parts, then (if the wallet
             // can bulk-sign) merge everything into one deed, then paint + commit
             const txs = await buildAcquireTxs(api, address, claimRect, listings, sprite ?? undefined, hasBulkSigner(api));
-            const hashes = await signAndSubmitAll(api, txs, setSignProg);
+            const hashes = await signAndSubmitAll(api, txs, setSignProg, connectedWallet?.name);
             setResult(hashes[hashes.length - 1]);
             if (sprite) { clearSavedSprite(); setResumed(false); }
             setSel(null);
@@ -275,7 +275,7 @@ export function Claim() {
 
     return (
         <section>
-            <TxProgress p={signProg} />
+            <TxProgress p={signProg} onClose={() => setSignProg(null)} />
             <div className="pagehead">
                 <h2>Claim</h2>
                 <p className="tagline">
@@ -287,9 +287,9 @@ export function Claim() {
                 </p>
             </div>
 
-            {isOwner && (
+            {isSteward && (
                 <div className="actionbar">
-                    <span className="muted">protocol owner — price is
+                    <span className="muted">protocol steward — price is
                         &nbsp;<b>{state ? lovelaceToAda(state.pricePerPixelLovelace) : "…"} ₳</b>/px</span>
                     <label>
                         set ₳/px
@@ -364,7 +364,7 @@ export function Claim() {
                     <span>
                         {sprite ? "image placed at" : "selection"}{" "}
                         <code>{claimRect.x0},{claimRect.y0} → {claimRect.x1},{claimRect.y1}</code>
-                        &nbsp;({area(claimRect)} px{price != null && <> — <b>{ownerFree ? "free (owner)" : `${lovelaceToAda(price)} ₳`}</b></>})
+                        &nbsp;({area(claimRect)} px{price != null && <> — <b>{stewardFree ? "free (steward)" : `${lovelaceToAda(price)} ₳`}</b></>})
                     </span>
                 )}
                 {claimRect && !buyable && (
@@ -391,7 +391,7 @@ export function Claim() {
                     disabled={!claimRect || !buyable || !isConnected || busy != null}
                     onClick={() => void claim()}
                 >
-                    {busy ?? (hasListed ? "acquire this area" : ownerFree ? "claim this area (free)" : "claim this area")}
+                    {busy ?? (hasListed ? "acquire this area" : stewardFree ? "claim this area (free)" : "claim this area")}
                 </button>
             </div>
             {result && (

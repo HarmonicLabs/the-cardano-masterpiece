@@ -24,10 +24,10 @@
 //  Editing is DECOUPLED from the root so leaf edits parallelize freely:
 //    * `LeafNode.edit` spends ONE leaf (one per tx — an 8KB chunk output
 //      barely fits the tx size limit) and never touches the root. Changed
-//      bytes must be covered by Ownership NFTs (policy =
-//      `ownershipContractHash`) present in REFERENCE inputs whose holding
+//      bytes must be covered by Stewardship NFTs (policy =
+//      `stewardshipContractHash`) present in REFERENCE inputs whose holding
 //      addresses SIGNED the tx — pub-key holders only, script-held
-//      ownership cannot edit. Different leaves = different UTxOs, so edits
+//      stewardship cannot edit. Different leaves = different UTxOs, so edits
 //      to different leaves land in the same block without contention.
 //    * `RootNft.commit` spends ONLY the root, REFERENCES any set of leaf
 //      UTxOs (redeemer indices sorted by ascending leaf index), and syncs
@@ -90,7 +90,7 @@ function wholeImageCidOf( header: bytes, leafsCids: List<bytes> ): bytes {
 
 contract Masterpiece {
 
-    param ownershipContractHash: bytes;
+    param stewardshipContractHash: bytes;
     param genesisUtxo: TxOutRef;
     param bmpHeader: bytes; // BMP header + 256-color palette (~1078 bytes),
                             // immutable, top-down rows (negative biHeight)
@@ -255,14 +255,14 @@ contract Masterpiece {
         rawCid: bytes; // cidV1Raw( chunk )
         chunk: bytes;  // 8192 bytes = rows [8*idx, 8*idx+8)
 
-        // chunk integrity + pixel ownership of every changed byte.
-        // `ownerRects`: the rects (sorted by x0) of the Ownership NFTs
+        // chunk integrity + pixel stewardship of every changed byte.
+        // `stewardRects`: the rects (sorted by x0) of the Stewardship NFTs
         // covering the changed pixels. The validator FORMATS each rect into
         // its human-readable asset name — "masterpiece-x0-y0-x1-y1" — and
         // requires that NFT; formatting is injective, so the redeemer can
         // only name rects that were genuinely claimed.
         spend edit(
-            ownerRects: List<Coordinates>
+            stewardRects: List<Coordinates>
         ) {
             const { tx, spendingRef, state: { idx: li, chunk: oldChunk } } = context;
 
@@ -288,18 +288,18 @@ contract Masterpiece {
             assert newChunk.length() == CHUNK_SIZE;
             assert newCid == cidV1Raw( newChunk );
 
-            // ownership: every named NFT must sit in a reference input whose
+            // stewardship: every named NFT must sit in a reference input whose
             // holder signed this tx. Pub-key holders only — script-held
-            // ownership NFTs cannot edit.
-            const ownershipHash = this.ownershipContractHash;
-            const nRects = ownerRects.length();
-            // head/tail walk — never index `ownerRects[n]` (each `[n]` is a
+            // stewardship NFTs cannot edit.
+            const stewardshipHash = this.stewardshipContractHash;
+            const nRects = stewardRects.length();
+            // head/tail walk — never index `stewardRects[n]` (each `[n]` is a
             // dropList re-traversal); matches the Aiken port's shape
-            let refRects = ownerRects;
+            let refRects = stewardRects;
             for( let n = 0; n < nRects; n++ ) {
                 const nm = rectName( refRects.head() );
                 const Some{ value: refIn } = tx.refInputs.find( i =>
-                    i.resolved.value.amountOf( ownershipHash, nm ) == 1
+                    i.resolved.value.amountOf( stewardshipHash, nm ) == 1
                 );
                 const PubKey{ hash: holderPkh } = refIn.resolved.address.payment;
                 assert tx.requiredSigners.includes( holderPkh );
@@ -316,8 +316,8 @@ contract Masterpiece {
                 const rowOff = r * LINE_LENGTH;
                 let cursor = 0;
                 // head/tail walk of the rects for THIS row (reset each row) —
-                // never index `ownerRects[n]`; matches the Aiken port's shape
-                let rects = ownerRects;
+                // never index `stewardRects[n]`; matches the Aiken port's shape
+                let rects = stewardRects;
                 for( let n = 0; n < nRects; n++ ) {
                     const rc = rects.head();
                     // rects not covering this row contribute an empty gap

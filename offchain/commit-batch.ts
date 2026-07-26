@@ -15,9 +15,9 @@ import {
     sortedRefIndex, findUtxoWithAsset, assetAmount, pureAdaUtxo, txBuilder, submitSignedTx, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
+    stewardshipContract, masterpieceContract, lockContract, lockedDatum, buildBmpHeader,
     rootDatum, leafDatum, nurseryDatum, initialChunk, freeDatum, lovelacePerPixelDatum,
-    mpMintInit, mpHatch, mpEdit, mpCommit, oMintInit, oMintFree, oOwnerClaim,
+    mpMintInit, mpHatch, mpEdit, mpCommit, oMintInit, oMintFree, oStewardClaim,
     carveComplements, rectName,
     FREE_TOKEN_NAME, PRICE_NFT_NAME, LEAF_NFT_NAME, ROOT_REF_NFT_NAME, ROOT_USER_NFT_NAME,
     N_LEAFS, LINE_LENGTH, MIN_LOVELACE_PER_PIXEL, type Rect,
@@ -45,7 +45,7 @@ step("0. wallet + funding");
 const dep: Wallet = ensureWallet(`cb-${Date.now()}`);
 const fundTx = fundFromGenesis([
     { address: dep.address, lovelace: ADA(10) },     // collateral
-    { address: dep.address, lovelace: ADA(5) },      // ownership genesis
+    { address: dep.address, lovelace: ADA(5) },      // stewardship genesis
     { address: dep.address, lovelace: ADA(5) },      // masterpiece genesis
     { address: dep.address, lovelace: ADA(110) },    // ref deploys
     { address: dep.address, lovelace: ADA(6000) },   // hatch funds (parks ~60/leaf)
@@ -61,7 +61,7 @@ const fundHatch = dU.find((u) => u.resolved.value.lovelaces === ADA(6000))!;
 assert(coll && genesisO && genesisM && genesisO.utxoRef.toString() !== genesisM.utxoRef.toString() && fundRef && fundHatch, "funding utxos");
 
 const bmp = buildBmpHeader();
-const own = ownershipContract(dep.address, genesisO.utxoRef);   // protocolOwner = dep
+const own = stewardshipContract(dep.address, genesisO.utxoRef);   // protocolSteward = dep
 const mp = masterpieceContract(own.hash.toBuffer(), genesisM.utxoRef, bmp);
 const lock = lockContract();
 const work = (min: bigint): UTxO => pureAdaUtxo(queryUtxos(dep.address).filter(notRef(coll)).filter(notRef(fundRef)).filter(notRef(fundHatch)), min)!;
@@ -84,7 +84,7 @@ const refO = atLock.find((u) => u.utxoRef.id.toString() === dO && Number(u.utxoR
 const refM = atLock.find((u) => u.utxoRef.id.toString() === dM && Number(u.utxoRef.index) === 0)!;
 
 // ---------------------------------------------------------------------------
-step("1. ownership init + 2. masterpiece init");
+step("1. stewardship init + 2. masterpiece init");
 {
     const w = work(ADA(200));
     await signSubmitAwait({
@@ -96,7 +96,7 @@ step("1. ownership init + 2. masterpiece init");
             { address: own.address, value: withAda(ADA(3), own.policyHex, [[PRICE_NFT_NAME, 1n]]), datum: lovelacePerPixelDatum(MIN_LOVELACE_PER_PIXEL) },
         ],
         changeAddress: dep.address,
-    }, dep, "ownership-init", own.address);
+    }, dep, "stewardship-init", own.address);
 }
 const initCid = cidV1Raw(initialChunk());
 const initialLeafCids = Array.from({ length: N_LEAFS }, () => initCid);
@@ -118,7 +118,7 @@ const rootD0 = rootDatum(initialLeafCids, bmp);
 }
 
 // ---------------------------------------------------------------------------
-step("3. ownerClaim a full-height 1-px column (one owned pixel in every leaf)");
+step("3. stewardClaim a full-height 1-px column (one owned pixel in every leaf)");
 const COL: Rect = { x0: 0, y0: 0, x1: 1, y1: 1008 };
 const colName = rectName(COL);
 {
@@ -126,7 +126,7 @@ const colName = rectName(COL);
     const freeNode = findUtxoWithAsset(free, own.policyHex, FREE_TOKEN_NAME)!;
     const comps = carveComplements(CANVAS, COL); // [ right {1,0,1008,1008} ]
     await signSubmitAwait({
-        inputs: [{ utxo: freeNode, referenceScript: { refUtxo: refO, datum: "inline", redeemer: oOwnerClaim(COL) } }, work(ADA(50))],
+        inputs: [{ utxo: freeNode, referenceScript: { refUtxo: refO, datum: "inline", redeemer: oStewardClaim(COL) } }, work(ADA(50))],
         collaterals: [coll],
         requiredSigners: [dep.pkh],
         mints: [{ value: Value.add(Value.singleAsset(new Hash28(own.policyHex), colName, 1n), tokens(own.policyHex, [[FREE_TOKEN_NAME, BigInt(comps.length - 1)]])), script: { ref: refO, redeemer: oMintFree() } }],
@@ -135,7 +135,7 @@ const colName = rectName(COL);
             { address: dep.address, value: withAda(ADA(2), own.policyHex, [[colName, 1n]]) },
         ],
         changeAddress: dep.address,
-    }, dep, "ownerclaim-col", dep.address);
+    }, dep, "stewardclaim-col", dep.address);
     console.log("  owns column (0,0)-(1,1008) ✓");
 }
 

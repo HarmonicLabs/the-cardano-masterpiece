@@ -2,17 +2,17 @@
   "network": "preprod",
   "masterpiecePolicy": "1c34bfd9f4568386ed48672873a573ab54448a07d098a8ada74cd793",
   "masterpieceAddress": "addr_test1wqwrf07e73tg8phdfpnjsua9ww44g3y2qlgf329d5axd0yctzafsr",
-  "ownershipPolicy": "c72ada594117c72b75bed572a1811f8e7e89727317d9fddf367894b3",
-  "ownershipAddress": "addr_test1wrrj4kjegytuw2m4hm2h9gvpr788aztjwvtanlwlxeuffvcnrs6ew",
+  "stewardshipPolicy": "c72ada594117c72b75bed572a1811f8e7e89727317d9fddf367894b3",
+  "stewardshipAddress": "addr_test1wrrj4kjegytuw2m4hm2h9gvpr788aztjwvtanlwlxeuffvcnrs6ew",
   "port": 8787,
-  "protocolOwnerAddress": "addr_test1qzq55vqf303tduqa0f6r4rmamt2lxw5c98yp5rcyekl6aupgrkxchwfa7uzxtc4sssn4hdp8pdhpe0gvnl3tec8yzjsq5enqa4",
+  "protocolStewardAddress": "addr_test1qzq55vqf303tduqa0f6r4rmamt2lxw5c98yp5rcyekl6aupgrkxchwfa7uzxtc4sssn4hdp8pdhpe0gvnl3tec8yzjsq5enqa4",
   "marketplacePolicy": "3821c9d24133d5455e82201d22aac2ed0a6dc5cf37fe0716391d15e7",
   "marketplaceAddress": "addr_test1wquzrjwjgyea2327sgsp6g42ctks5mw9eumlupck8yw3tec3hqdfd",
   "marketplaceRefScript": {
     "txHash": "2c407fd3ff274d37566a4dad7cfae3f7c50e293690842c2c877a5ae7d3e3b39d",
     "index": 0
   },
-  "ownershipRefScript": {
+  "stewardshipRefScript": {
     "txHash": "fecbca26ad15031f495b5d6b13d44971e4b16a3653061536d6fe779bbfb0bcba",
     "index": 0
   },

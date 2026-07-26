@@ -1,5 +1,5 @@
 // ===========================================================================
-//  Marketplace — secondary market for Ownership deed NFTs
+//  Marketplace — secondary market for Stewardship deed NFTs
 // ===========================================================================
 //
 //  Two kinds of orders, one state each:
@@ -13,7 +13,7 @@
 //                    listing, so one payment can never satisfy two orders
 //                    (no double satisfaction, in this or any other protocol).
 //    - `partialBuy`: buy ANY sub-rect of the listed deed in ONE tx. The tx
-//                    composes with the Ownership policy's `carve` mint
+//                    composes with the Stewardship policy's `carve` mint
 //                    (parent burned, bought sub-rect + its ≤4 guillotine
 //                    complements minted, geometry fully validated there):
 //                    the buyer takes the bought piece paying for ITS area
@@ -30,7 +30,7 @@
 //    - `cancel`: the requester signs and takes the offer back.
 //
 //  Sellers and requesters must be pubkey addresses (cancel authenticates via
-//  `requiredSigners`; script-credentialed owners cannot sign).
+//  `requiredSigners`; script-credentialed stewards cannot sign).
 //
 //  A bare fallback `spend` covers UTxOs whose datum is ill-formed (or
 //  missing): such value was sent here by mistake, belongs to nobody the
@@ -44,7 +44,7 @@ const MIN_LISTING_LOVELACE = 2_000_000;
 
 contract Marketplace {
 
-    // policy of the Ownership deed NFTs this market trades
+    // policy of the Stewardship deed NFTs this market trades
     param collectionPolicy: bytes;
 
     state Listing {
@@ -78,7 +78,7 @@ contract Marketplace {
         }
 
         // buy ANY sub-rect `bought` of the listed deed `parent` in one tx.
-        // The tx must run the Ownership policy's `carve` mint: parent
+        // The tx must run the Stewardship policy's `carve` mint: parent
         // burned, bought + its validator-computed guillotine complements
         // minted (geometry and exact mint fully validated THERE). Every
         // complement must come back here as a fresh Listing on the same
@@ -180,7 +180,7 @@ contract Marketplace {
             assert tx.inputs.filter( i => i.resolved.address == ownAddr ).length() == 1;
 
             // the requested deed reaches the requester. Deed names are
-            // unique (ownership tiling invariant), so this output cannot
+            // unique (stewardship tiling invariant), so this output cannot
             // satisfy anything else
             const wanted = rectName( coords );
             const Some{ value: delivery } = tx.outputs.find( o =>

@@ -18,7 +18,7 @@ import {
     sortedRefIndex, findUtxoWithAsset, pureAdaUtxo, txBuilder, submitSignedTx, type Wallet,
 } from "./lib.ts";
 import {
-    ownershipContract, marketplaceContract, lockContract, lockedDatum,
+    stewardshipContract, marketplaceContract, lockContract, lockedDatum,
     freeDatum, listingDatum, requestDatum, lovelacePerPixelDatum,
     oMintInit, oMintFree, oClaim, mBuy, mFill, mListingCancel, mRequestCancel,
     carveComplements, rectName, rectArea, txOutRefData,
@@ -56,13 +56,13 @@ const sColl = sU.find((u) => u.resolved.value.lovelaces === ADA(10))!;
 const genesisU = sU.find((u) => u.resolved.value.lovelaces === ADA(50))!;
 const sFunds = sU.find((u) => u.resolved.value.lovelaces === ADA(2000))!;
 
-const own = ownershipContract(seller.address, genesisU.utxoRef);
+const own = stewardshipContract(seller.address, genesisU.utxoRef);
 const market = marketplaceContract(own.hash.toBuffer());
 const deed = (r: Rect, n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), rectName(r), n);
 const marker = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), FREE_TOKEN_NAME, n);
 const priceNft = (n: bigint): Value => Value.singleAsset(new Hash28(own.policyHex), PRICE_NFT_NAME, n);
 const withAda = (l: bigint, v: Value): Value => Value.add(Value.lovelaces(l), v);
-console.log("  seller/buyer/mallory funded; ownership", own.policyHex, "marketplace", market.policyHex);
+console.log("  seller/buyer/mallory funded; stewardship", own.policyHex, "marketplace", market.policyHex);
 
 // ---------------------------------------------------------------------------
 step("0b. deploy reference scripts");
@@ -83,7 +83,7 @@ const noRefs = (u: { utxoRef: { toString(): string } }): boolean =>
     u.utxoRef.toString() !== refO.utxoRef.toString() && u.utxoRef.toString() !== refK.utxoRef.toString();
 
 // ---------------------------------------------------------------------------
-step("1. ownership init");
+step("1. stewardship init");
 {
     const gIdx = sortedRefIndex([genesisU.utxoRef, sFunds.utxoRef], genesisU.utxoRef);
     await signSubmitAwait({
@@ -95,7 +95,7 @@ step("1. ownership init");
             { address: own.address, value: withAda(ADA(3), priceNft(1n)), datum: lovelacePerPixelDatum(LOVELACE_PER_PIXEL) },
         ],
         changeAddress: seller.address,
-    }, seller, "ownership-init", own.address);
+    }, seller, "stewardship-init", own.address);
 }
 
 // ---- helper: seller claims a deed rect from the current free tiling --------

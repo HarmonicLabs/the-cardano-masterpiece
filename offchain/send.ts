@@ -30,7 +30,7 @@ console.log("to    :", recipient);
 console.log("amount:", ada.toString(), "ada");
 
 const protectedRefs = [
-    config.ownershipRefScript, config.masterpieceRefScript, config.marketplaceRefScript,
+    config.stewardshipRefScript, config.masterpieceRefScript, config.marketplaceRefScript,
 ].map((r: { txHash: string; index: number }) => `${r.txHash}#${r.index}`);
 
 const utxos = await provider.queryUtxos(wallet.address);

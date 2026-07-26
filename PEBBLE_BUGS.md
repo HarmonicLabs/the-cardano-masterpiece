@@ -40,44 +40,44 @@ Covered by 13 tests in
 if the fix is reverted): the whole CLASS — `for` / `while` / `for-of`
 effect-only loops, sequential and nested ones, every-iteration-runs and
 no-over-run checks, a structural check that the in-loop comparison
-survives into the compiled script, the reduced ownership guard (missing
+survives into the compiled script, the reduced stewardship guard (missing
 ref input, unsigned holder, second name unchecked), plus the
 `find`-destructure symptom.
 
 Please re-run the on-devnet adversarial test to confirm end-to-end. NOTE:
 `bench-aiken.ts` currently cannot validate this — with the sources as of
-07-25 18:25 the `edit`, `claim` and `ownership init` scenarios FAIL for
+07-25 18:25 the `edit`, `claim` and `stewardship init` scenarios FAIL for
 both implementations (Aiken fails 5 of 7), identically before and after
 this fix.
 
 ### Original report
 
 Found by an on-devnet adversarial test (2026-07-25). The masterpiece
-`LeafNode.edit` ownership guard (`src/masterpiece.pebble` ~L286):
+`LeafNode.edit` stewardship guard (`src/masterpiece.pebble` ~L286):
 
 ```
 for( let n = 0; n < nRects; n++ ) {
     const nm = rectName( refRects.head() );
     const Some{ value: refIn } = tx.refInputs.find( i =>
-        i.resolved.value.amountOf( ownershipHash, nm ) == 1 );   // <-- returns None
+        i.resolved.value.amountOf( stewardshipHash, nm ) == 1 );   // <-- returns None
     const PubKey{ hash: holderPkh } = refIn.resolved.address.payment;
     assert tx.requiredSigners.includes( holderPkh );
     refRects = refRects.tail();
 }
 ```
 
-is supposed to reject an edit unless the tx references, for EVERY `ownerRect`,
+is supposed to reject an edit unless the tx references, for EVERY `stewardRect`,
 a reference input holding that deed whose pub-key holder signed. It does not.
 
 **Repro (ledger ACCEPTS a tx that must fail):** claim `(0,0)-(2,2)`, then edit
-leaf 0 with redeemer `ownerRects = [(3,3)-(5,5)]` (a rect the signer holds NO
+leaf 0 with redeemer `stewardRects = [(3,3)-(5,5)]` (a rect the signer holds NO
 deed for), referencing only the `(0,0)-(2,2)` deed, signing with its holder,
 and changing pixel `(3,3)` (inside the *claimed* rect, so the "unchanged
 outside owned rects" row-gap check passes). `cardano-cli transaction submit`
 succeeds on the devnet node (phase-2 passes) — i.e. **you can overwrite any
 pixels on the canvas without owning them.**
 
-**Impact:** the deed-ownership requirement for edits is fully bypassable →
+**Impact:** the deed-stewardship requirement for edits is fully bypassable →
 anyone can edit anyone's plot. buildooor's build-time eval also does NOT reject
 it (it *does* reject the row-gap violation in the sibling case), so it slipped
 past local checks too.
@@ -87,7 +87,7 @@ past local checks too.
 `refIn.resolved.…` / the `requiredSigners.includes` assert without trapping and
 the guard passes. So `const Some{…} = <None>` is NOT the refutable, fail-on-
 no-match binding the sources rely on (this pattern is used the same way in
-`ownership.pebble` `claim`, so those paths may be equally affected). Needs
+`stewardship.pebble` `claim`, so those paths may be equally affected). Needs
 UPLC-level diagnosis of the `find` builtin lowering + the `Some` extractor on a
 `None` value. NOT fixing here (compiler is a separate agent's remit); the
 sibling row-gap check (`slice ==`) works, so only the option-destructure of a
@@ -97,7 +97,7 @@ needed (vs. a wrong one) is a pending granular probe.
 ## FIXED — BUG 11 (compile crash) and BUG 12 (cross-arm extractor miscompilation)
 
 Both confirmed FIXED in the local builds of 2026-07-22 (pebble + plutus-machine >3.0.3)
-and verified on-devnet: the full `ownership.pebble` — 4 mint methods, state, all
+and verified on-devnet: the full `stewardship.pebble` — 4 mint methods, state, all
 bodies — now passes node-side phase-2 on a real init tx (previously
 `force tailList []`). Kept for the record:
 
@@ -179,7 +179,7 @@ to a mutable `let` now fails compilation with
 
 ## BUG 17 — single-state datum ABI: spend dispatch and `as Contract` cast disagree (RESOLVED 2026-07-23 — doc bug, not a compiler bug)
 
-**RESOLUTION:** dispatch and the `as Ownership` cast **agree** — both decode the
+**RESOLUTION:** dispatch and the `as Stewardship` cast **agree** — both decode the
 WRAPPED form `Constr 0 [ coords ]` — on 0.3.6 and on the local compiler alike,
 verified by execution tests driving both paths with the same datum
 (`compiler.masterpieceBugs.0_3_6.singleStateAbi.test.ts` pins the ABI).
@@ -187,7 +187,7 @@ verified by execution tests driving both paths with the same datum
 What actually happened: `State.md` incorrectly documented the single-state datum
 as bare fields (`shortcutSingleConstructor`); the observed `unIData :: not a data
 integer` came from casting the state datum `as Coordinates` (the FIELD struct)
-rather than `as Ownership` / `as Ownership.Free`. The doc is fixed (wrapped
+rather than `as Stewardship` / `as Stewardship.Free`. The doc is fixed (wrapped
 `Constr 0 [fields]`, with a caution that nested struct fields are themselves
 Constr-wrapped).
 
@@ -199,21 +199,21 @@ Consequences for this repo:
   coincide).
 - Free functions needing the union cast: `export contract` + importing the
   contract type (0.3.7 `redeemerof`/contract-export feature) makes
-  `od as Ownership` available outside method bodies.
+  `od as Stewardship` available outside method bodies.
 
-For a contract with exactly ONE `state` (Ownership's `Free { coords: Coordinates }`):
+For a contract with exactly ONE `state` (Stewardship's `Free { coords: Coordinates }`):
 
 - the SPEND dispatch decodes the datum as the WRAPPED record `Constr 0 [ coords ]`
   (bare coords datum → `unConstrData :: not a data constructor, data "0"` — it
   unConstrs the first int field);
-- the `as Ownership` union cast (and the docs' `shortcutSingleConstructor`
+- the `as Stewardship` union cast (and the docs' `shortcutSingleConstructor`
   description in `State.md`) decode the BARE record (wrapped datum →
   `unIData :: not a data integer`).
 
 The same datum cannot satisfy both, making any single-state contract that inspects
 its own continuing datums internally inconsistent. Also: the `as Contract` union
 cast only resolves inside contract methods — a free function using it fails with
-`'Ownership' is not defined` (fine as a scoping rule, but it forces datum decodes
+`'Stewardship' is not defined` (fine as a scoping rule, but it forces datum decodes
 into method bodies).
 
 **Contract-side workaround applied**: a dummy second state (`state Unused`, no spend
@@ -231,7 +231,7 @@ negative quantity ("valueContains :: negative quantity in first value").
 exact-mint check of a burning tx errors at runtime** — there is currently no
 Pebble-native way to compare a mint value that includes a burn.
 
-Repro (hit on preprod, deployed ownership contract `03ac47b3…`): the
+Repro (hit on preprod, deployed stewardship contract `03ac47b3…`): the
 `Free.claim` path where the claim covers the whole free rect mints
 `{ deed: +1, marker: -1 }`; `valueEq( tx.mint, expected )` (defined as
 `a.contains(b) && b.contains(a)`) fails with

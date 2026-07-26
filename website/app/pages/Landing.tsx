@@ -2,6 +2,16 @@ import { useEffect, useState } from "react";
 import { CanvasBoard } from "../components/CanvasBoard.tsx";
 import { fetchPixels, fetchState, type CanvasStateInfo } from "../lib/api.ts";
 
+// CIP-68 (222) user token for the root "masterpiece" NFT.
+const ROOT_USER_ASSET_NAME = "000de1406d61737465727069656365";
+// cardanoscan host per network: mainnet has no subdomain, testnets do (preprod/preview).
+const explorerBase = (net: string) =>
+    net === "mainnet" ? "https://cardanoscan.io" : `https://${net}.cardanoscan.io`;
+// Resolve ipfs:// to an HTTP gateway (not all browsers speak ipfs:// natively).
+// Link TEXT stays `ipfs://<cid>`; only the href points at the gateway.
+const ipfsGateway = (uri: string) =>
+    `https://most-brass-sun.quicknode-ipfs.com/ipfs/${uri.replace(/^ipfs:\/\//, "")}`;
+
 export function Landing() {
     const [pixels, setPixels] = useState<Uint8Array | null>(null);
     const [state, setState] = useState<CanvasStateInfo | null>(null);
@@ -31,14 +41,18 @@ export function Landing() {
             {error && <p className="err">failed to load chain state: {error}</p>}
             {state && (
                 <>
-                    <div className="stats">
-                        <span><b>{state.hatchedLeaves.length}</b>/128 leaves on-chain</span>
-                        <span><b>{state.unhatched}</b> unhatched (shown white)</span>
-                        <span>network <b>{state.network}</b></span>
-                        <span>updated <b>{new Date(state.fetchedAt).toLocaleTimeString()}</b></span>
-                    </div>
                     {state.committedImageUri &&
-                        <p className="uri">last committed CIP-68 image: {state.committedImageUri}</p>}
+                        <p className="uri">last committed CIP-68 image:{" "}
+                            <a href={ipfsGateway(state.committedImageUri)} target="_blank" rel="noreferrer">
+                                {state.committedImageUri}
+                            </a>
+                        </p>}
+                    <p className="uri">
+                        <a href={`${explorerBase(state.network)}/token/${state.masterpiecePolicy}${ROOT_USER_ASSET_NAME}`}
+                           target="_blank" rel="noreferrer">
+                            root NFT on Cardanoscan ↗
+                        </a>
+                    </p>
                 </>
             )}
         </section>

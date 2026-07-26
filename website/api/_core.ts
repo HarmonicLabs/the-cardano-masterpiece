@@ -7,7 +7,7 @@
 //    GET  /                    the app (dist/ build; `npm run dev` proxies here)
 //    GET  /canvas.bin          1024*1024 palette indices, straight from leaf UTxOs
 //    GET  /api/state           canvas metadata
-//    GET  /api/free            unclaimed rectangles (ownership Free nodes)
+//    GET  /api/free            unclaimed rectangles (stewardship Free nodes)
 //    GET  /api/plots?address=  plots owned by an address (deed NFTs)
 //    POST /api/tx/claim        { address, rect }           -> { txs } unsigned cbor,
 //                              one tx per intersected Free node, submit in order
@@ -37,13 +37,13 @@ interface Config {
     network: string;
     masterpiecePolicy: string;
     masterpieceAddress: string;
-    ownershipPolicy: string;
-    ownershipAddress: string;
-    protocolOwnerAddress: string;
+    stewardshipPolicy: string;
+    stewardshipAddress: string;
+    protocolStewardAddress: string;
     marketplacePolicy: string;
     marketplaceAddress: string;
     marketplaceRefScript: { txHash: string; index: number };
-    ownershipRefScript: { txHash: string; index: number };
+    stewardshipRefScript: { txHash: string; index: number };
     masterpieceRefScript: { txHash: string; index: number };
     port: number;
 }
@@ -112,11 +112,11 @@ const asInt = (d: unknown): number => {
     return Number(d.int);
 };
 
-// the owner-set price, read from the NFT-validated LovelacePerPixel config node
+// the steward-set price, read from the NFT-validated LovelacePerPixel config node
 const PRICE_NFT_NAME_HEX = Buffer.from("price-nft").toString("hex");
 export async function currentPrice(): Promise<bigint> {
-    for (const u of await utxosAt(config.ownershipAddress)) {
-        if (amountOf(u, config.ownershipPolicy, PRICE_NFT_NAME_HEX) !== 1n || !u.resolved.datum) continue;
+    for (const u of await utxosAt(config.stewardshipAddress)) {
+        if (amountOf(u, config.stewardshipPolicy, PRICE_NFT_NAME_HEX) !== 1n || !u.resolved.datum) continue;
         try {
             const d = asConstr(u.resolved.datum);
             if (Number(d.constr) === 1 && d.fields[0] instanceof DataI) return d.fields[0].int;
@@ -142,7 +142,7 @@ let _refO: UTxO | undefined, _refM: UTxO | undefined, _refK: UTxO | undefined;
 async function refScripts(): Promise<{ refO: UTxO; refM: UTxO; refK: UTxO }> {
     if (!_refO || !_refM || !_refK) {
         const [o, m, k] = await api.resolveUtxos([
-            new TxOutRef({ id: config.ownershipRefScript.txHash, index: config.ownershipRefScript.index }),
+            new TxOutRef({ id: config.stewardshipRefScript.txHash, index: config.stewardshipRefScript.index }),
             new TxOutRef({ id: config.masterpieceRefScript.txHash, index: config.masterpieceRefScript.index }),
             new TxOutRef({ id: config.marketplaceRefScript.txHash, index: config.marketplaceRefScript.index }),
         ]);
@@ -197,7 +197,7 @@ const txOutRefTag = (ref: TxOutRef): DataConstr => new DataConstr(0, [
 const addressFromData = (d: unknown): Address =>
     Address.fromData(d as Parameters<typeof Address.fromData>[0], "testnet");
 
-// guillotine complements of `target` in `parent` — mirrors ownership `carve`
+// guillotine complements of `target` in `parent` — mirrors stewardship `carve`
 // (fixed order top, bottom, left, right)
 const carveComplements = (parent: Rect, target: Rect): Rect[] => {
     const out: Rect[] = [];
@@ -277,10 +277,10 @@ export async function chainState(force = false): Promise<ChainState> {
 interface FreeNode { rect: Rect; utxo: UTxO; }
 
 export async function freeNodes(): Promise<FreeNode[]> {
-    const utxos = await utxosAt(config.ownershipAddress);
+    const utxos = await utxosAt(config.stewardshipAddress);
     const out: FreeNode[] = [];
     for (const u of utxos) {
-        if (amountOf(u, config.ownershipPolicy, "") !== 1n) continue;
+        if (amountOf(u, config.stewardshipPolicy, "") !== 1n) continue;
         if (!u.resolved.datum) continue;
         // Free = Constr 0 [ Constr 0 [x0,y0,x1,y1] ]
         const d = asConstr(u.resolved.datum);
@@ -303,7 +303,7 @@ export async function plotsOf(address: Address): Promise<{ plots: Plot[]; utxos:
     const plots: Plot[] = [];
     for (const u of utxos) {
         const j = u.resolved.value.toJson() as ValueJson;
-        const assets = j[config.ownershipPolicy];
+        const assets = j[config.stewardshipPolicy];
         if (!assets) continue;
         for (const [nameHex, qty] of Object.entries(assets)) {
             if (BigInt(qty) < 1n) continue;
@@ -342,10 +342,10 @@ export async function marketOrders(): Promise<MarketOrders> {
             const d = asConstr(u.resolved.datum);
             if (Number(d.constr) === 0) {
                 // Listing { seller, pricePerPixel } — the sold deed is the
-                // ownership asset held by the utxo
+                // stewardship asset held by the utxo
                 const seller = addressFromData(d.fields[0]);
                 const ppp = BigInt(asInt(d.fields[1]));
-                const assets = (u.resolved.value.toJson() as ValueJson)[config.ownershipPolicy];
+                const assets = (u.resolved.value.toJson() as ValueJson)[config.stewardshipPolicy];
                 if (!assets) continue;
                 for (const [nameHex, qty] of Object.entries(assets)) {
                     if (BigInt(qty) !== 1n) continue;
@@ -376,21 +376,21 @@ export async function marketOrders(): Promise<MarketOrders> {
     return { listings, requests };
 }
 
-// every minted deed (asset registry of the ownership policy): claimed plots
+// every minted deed (asset registry of the stewardship policy): claimed plots
 interface DeedInfo { rect: Rect; name: string; }
 let _deeds: { at: number; deeds: DeedInfo[] } | undefined;
 export async function deedsRegistry(): Promise<DeedInfo[]> {
     if (_deeds && Date.now() - _deeds.at < 30_000) return _deeds.deeds;
     const deeds: DeedInfo[] = [];
     for (let page = 1; page < 100; page++) {
-        const res = await fetch(`${BLOCKFROST_URL}/assets/policy/${config.ownershipPolicy}?page=${page}&count=100`, { headers: bfHeaders() });
+        const res = await fetch(`${BLOCKFROST_URL}/assets/policy/${config.stewardshipPolicy}?page=${page}&count=100`, { headers: bfHeaders() });
         if (res.status === 404) break;
         if (!res.ok) throw new Error(`blockfrost assets/policy: ${res.status}`);
         const rows = await res.json() as { asset: string; quantity: string }[];
         if (!Array.isArray(rows) || rows.length === 0) break;
         for (const r of rows) {
             if (r.quantity !== "1") continue;
-            const nameHex = r.asset.slice(config.ownershipPolicy.length);
+            const nameHex = r.asset.slice(config.stewardshipPolicy.length);
             const name = Buffer.from(nameHex, "hex").toString("utf8");
             const m = NAME_RE.exec(name);
             if (!m) continue;
@@ -407,7 +407,7 @@ export async function deedsRegistry(): Promise<DeedInfo[]> {
 // the deployment — and referencing + spending the same utxo is rejected with
 // ReferenceInputsNotDisjointFromInputs anyway).
 const PROTECTED_REFS = [
-    `${config.ownershipRefScript.txHash}#${config.ownershipRefScript.index}`,
+    `${config.stewardshipRefScript.txHash}#${config.stewardshipRefScript.index}`,
     `${config.masterpieceRefScript.txHash}#${config.masterpieceRefScript.index}`,
     `${config.marketplaceRefScript.txHash}#${config.marketplaceRefScript.index}`,
 ];
@@ -465,19 +465,19 @@ async function buildOneClaim(
         ],
         collaterals: [collateral],
         mints: [{
-            value: tokens(config.ownershipPolicy, mintEntries),
+            value: tokens(config.stewardshipPolicy, mintEntries),
             script: { ref: refO, redeemer: oMintFree() },
         }],
         outputs: [
             ...complements.map((r) => ({
-                address: Address.fromString(config.ownershipAddress),
-                value: Value.add(Value.lovelaces(3_000_000n), tokens(config.ownershipPolicy, [[EMPTY_NAME, 1n]])),
+                address: Address.fromString(config.stewardshipAddress),
+                value: Value.add(Value.lovelaces(3_000_000n), tokens(config.stewardshipPolicy, [[EMPTY_NAME, 1n]])),
                 datum: freeDatum(r),
             })),
-            { address: Address.fromString(config.protocolOwnerAddress), value: Value.lovelaces(price) },
-            { address: userAddr, value: Value.add(Value.lovelaces(2_000_000n), tokens(config.ownershipPolicy, [[deedName, 1n]])) },
+            { address: Address.fromString(config.protocolStewardAddress), value: Value.lovelaces(price) },
+            { address: userAddr, value: Value.add(Value.lovelaces(2_000_000n), tokens(config.stewardshipPolicy, [[deedName, 1n]])) },
         ],
-        metadata: deedCip25(config.ownershipPolicy, [rect]),
+        metadata: deedCip25(config.stewardshipPolicy, [rect]),
         changeAddress: userAddr,
     };
     return (await txBuilder()).build(args);
@@ -555,7 +555,7 @@ export async function buildEditTx(
     }
 
     // the validator wants the covering rects sorted by x0
-    const ownerRects = plots
+    const stewardRects = plots
         .filter((p) => touched.has(p.name))
         .map((p) => p.rect)
         .sort((a, b) => a.x0 - b.x0);
@@ -571,7 +571,7 @@ export async function buildEditTx(
 
     const args: ITxBuildArgs = {
         inputs: [
-            { utxo: leaf.utxo, referenceScript: { refUtxo: refM, datum: "inline", redeemer: mpEdit(ownerRects) } },
+            { utxo: leaf.utxo, referenceScript: { refUtxo: refM, datum: "inline", redeemer: mpEdit(stewardRects) } },
             ...funding,
         ],
         readonlyRefInputs: deedUtxos,
@@ -644,7 +644,7 @@ export async function buildMarketListTx(userAddr: Address, name: string, pricePe
         inputs: [deedU, ...funding],
         outputs: [{
             address: Address.fromString(config.marketplaceAddress),
-            value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(plot.rect), 1n]])),
+            value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(plot.rect), 1n]])),
             datum: listingDatum(userAddr, pricePerPixel),
         }],
         changeAddress: userAddr,
@@ -667,13 +667,13 @@ export async function buildMarketBuyTx(userAddr: Address, utxoRef: string): Prom
         collaterals: [collateral],
         outputs: [
             { address: Address.fromString(l.seller), value: Value.lovelaces(l.priceTotal), datum: txOutRefTag(listingU.utxoRef) },
-            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(l.rect), 1n]])) },
+            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(l.rect), 1n]])) },
         ],
         changeAddress: userAddr,
     });
 }
 
-// buy any sub-rect of a listing: the tx composes the ownership `carve` mint;
+// buy any sub-rect of a listing: the tx composes the stewardship `carve` mint;
 // every complement goes back as a fresh Listing on the same terms
 export async function buildMarketPartialBuyTx(userAddr: Address, utxoRef: string, bought: Rect): Promise<Tx> {
     if (!rectValid(bought)) throw new Error("invalid rect");
@@ -701,21 +701,21 @@ export async function buildMarketPartialBuyTx(userAddr: Address, utxoRef: string
         ],
         collaterals: [collateral],
         mints: [{
-            value: tokens(config.ownershipPolicy, mintEntries),
+            value: tokens(config.stewardshipPolicy, mintEntries),
             script: { ref: refO, redeemer: oMintCarve(parent, bought) },
         }],
         outputs: [
             // complements relisted on the SAME terms: reuse the original datum
             ...comps.map((c) => ({
                 address: Address.fromString(config.marketplaceAddress),
-                value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(c), 1n]])),
+                value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(c), 1n]])),
                 datum: asConstr(listingU.resolved.datum),
             })),
             { address: Address.fromString(l.seller), value: Value.lovelaces(l.pricePerPixel * rectArea(bought)), datum: txOutRefTag(listingU.utxoRef) },
-            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(bought), 1n]])) },
+            { address: userAddr, value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(bought), 1n]])) },
         ],
         // CIP-25 artwork for every deed this carve mints (bought + complements)
-        metadata: deedCip25(config.ownershipPolicy, [bought, ...comps]),
+        metadata: deedCip25(config.stewardshipPolicy, [bought, ...comps]),
         changeAddress: userAddr,
     });
 }
@@ -724,9 +724,9 @@ export async function buildMarketPartialBuyTx(userAddr: Address, utxoRef: string
 export async function buildMarketCancelTx(userAddr: Address, utxoRef: string): Promise<Tx> {
     const orderU = await marketUtxo(utxoRef);
     const d = asConstr(orderU.resolved.datum);
-    const owner = addressFromData(d.fields[0]);
-    if (owner.paymentCreds.hash.toString() !== userAddr.paymentCreds.hash.toString())
-        throw new Error("only the order's owner can cancel it");
+    const steward = addressFromData(d.fields[0]);
+    if (steward.paymentCreds.hash.toString() !== userAddr.paymentCreds.hash.toString())
+        throw new Error("only the order's steward can cancel it");
     const redeemer = Number(d.constr) === 0 ? mListingCancel() : mRequestCancel();
     const { refK } = await refScripts();
     const { funding, collateral } = pickFunding(await utxosAt(userAddr.toString()));
@@ -782,7 +782,7 @@ export async function buildMarketFillTx(userAddr: Address, utxoRef: string): Pro
         ],
         collaterals: [collateral],
         outputs: [
-            { address: Address.fromString(r.requester), value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.ownershipPolicy, [[rectName(r.rect), 1n]])) },
+            { address: Address.fromString(r.requester), value: Value.add(Value.lovelaces(MIN_LISTING_LOVELACE), tokens(config.stewardshipPolicy, [[rectName(r.rect), 1n]])) },
         ],
         changeAddress: userAddr,
     });

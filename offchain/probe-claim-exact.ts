@@ -1,5 +1,5 @@
 // Reproduce the exact-claim (k=0) failure OFF-CHAIN by evaluating the
-// deployed ownership script directly against the script context captured
+// deployed stewardship script directly against the script context captured
 // from the failing tx build (see PEBBLE_BUGS.md).
 //
 //   CTX=<path to hex file with the ScriptContext data cbor>
@@ -20,10 +20,10 @@ const ctxData = dataFromCbor(ctxHex);
 
 const api = new BlockfrostPluts({ customBackend: (process.env.BLOCKFROST_URL ?? "https://blockfrost-preprod.onchainapps.io"), network: "preprod" });
 const [refU] = await api.resolveUtxos([
-    new TxOutRef({ id: config.ownershipRefScript.txHash, index: config.ownershipRefScript.index }),
+    new TxOutRef({ id: config.stewardshipRefScript.txHash, index: config.stewardshipRefScript.index }),
 ]);
 const script = refU.resolved.refScript!;
-console.log("deployed ownership script:", script.hash.toString());
+console.log("deployed stewardship script:", script.hash.toString());
 
 const prog = parseUPLC(script.bytes, "flat");
 const applied = new Application(prog.body, UPLCConst.data(ctxData));

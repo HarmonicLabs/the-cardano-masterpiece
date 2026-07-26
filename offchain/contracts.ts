@@ -1,6 +1,6 @@
 // ===========================================================================
 //  Contract loading, parameter application, datum/redeemer encoders.
-//  Must stay byte-compatible with src/ownership.pebble + src/masterpiece.pebble.
+//  Must stay byte-compatible with src/stewardship.pebble + src/masterpiece.pebble.
 // ===========================================================================
 import {
     Script, Address, Credential, Hash28, TxOutRef,
@@ -143,20 +143,20 @@ function bundle(script: Script): ContractBundle {
     };
 }
 
-// ownership params: [ protocolOwner: Address, genesisUtxo: TxOutRef ]
-export function ownershipContract(protocolOwnerAddress: Address, genesisRef: TxOutRef): ContractBundle {
-    return bundle(applyParams(flatOf("ownership"), [
-        protocolOwnerAddress.toData(),
+// stewardship params: [ protocolSteward: Address, genesisUtxo: TxOutRef ]
+export function stewardshipContract(protocolStewardAddress: Address, genesisRef: TxOutRef): ContractBundle {
+    return bundle(applyParams(flatOf("stewardship"), [
+        protocolStewardAddress.toData(),
         txOutRefData(genesisRef),
     ]));
 }
 
-// masterpiece params: [ ownershipContractHash: bytes, genesisUtxo: TxOutRef, bmpHeader: bytes ]
+// masterpiece params: [ stewardshipContractHash: bytes, genesisUtxo: TxOutRef, bmpHeader: bytes ]
 export function masterpieceContract(
-    ownershipHashBytes: Uint8Array, genesisRef: TxOutRef, bmpHeader: Uint8Array
+    stewardshipHashBytes: Uint8Array, genesisRef: TxOutRef, bmpHeader: Uint8Array
 ): ContractBundle {
     return bundle(applyParams(flatOf("masterpiece"), [
-        ownershipHashBytes,      // bytes param -> native bytestring
+        stewardshipHashBytes,      // bytes param -> native bytestring
         txOutRefData(genesisRef),
         bmpHeader,               // bytes param -> native bytestring
     ]));
@@ -205,7 +205,7 @@ export const nurseryDatum = (nextIdx: number): DataConstr =>
 
 export const initialChunk = (): Uint8Array => new Uint8Array(CHUNK_SIZE).fill(255);
 
-// ---- ownership datums ------------------------------------------------------
+// ---- stewardship datums ------------------------------------------------------
 // Free state datum: the state ABI wraps the record (Constr 0 [ coords ]) —
 // see PEBBLE_BUGS.md BUG 17 (dummy second state forces explicit encoding)
 export const freeDatum = (r: Rect): DataConstr => new DataConstr(0, [rectData(r)]);
@@ -228,9 +228,9 @@ export const mpEdit = (rects: Rect[]): DataConstr =>
     new DataConstr(0, [new DataList(rects.map(rectData))]);
 export const mpHatch = (): DataConstr => new DataConstr(0, []);
 
-// ownership mint methods (declaration order): init=0, free=1, merge=2,
+// stewardship mint methods (declaration order): init=0, free=1, merge=2,
 // carve=3 (`split` removed — it was the 1-complement case of carve).
-// Free spend: claim=0(coords), ownerClaim=1(coords)
+// Free spend: claim=0(coords), stewardClaim=1(coords)
 export const oMintInit = (genesisUtxoIdx: number): DataConstr =>
     new DataConstr(0, [new DataI(genesisUtxoIdx)]);
 export const oMintFree = (): DataConstr => new DataConstr(1, []);
@@ -240,7 +240,7 @@ export const oMintCarve = (parent: Rect, target: Rect): DataConstr =>
     new DataConstr(3, [rectData(parent), rectData(target)]);
 
 // guillotine complements of `target` in `parent`, in the validator's fixed
-// order (top, bottom, left, right) — mirrors ownership `carve` / `Free.claim`
+// order (top, bottom, left, right) — mirrors stewardship `carve` / `Free.claim`
 export const carveComplements = (parent: Rect, target: Rect): Rect[] => {
     const out: Rect[] = [];
     if (parent.y0 < target.y0) out.push({ x0: parent.x0, y0: parent.y0, x1: parent.x1, y1: target.y0 });
@@ -249,10 +249,10 @@ export const carveComplements = (parent: Rect, target: Rect): Rect[] => {
     if (target.x1 < parent.x1) out.push({ x0: target.x1, y0: target.y0, x1: parent.x1, y1: target.y1 });
     return out;
 };
-// Free spend methods (declaration order): claim=0, ownerClaim=1
+// Free spend methods (declaration order): claim=0, stewardClaim=1
 export const oClaim = (rect: Rect): DataConstr =>
     new DataConstr(0, [rectData(rect)]);
-export const oOwnerClaim = (rect: Rect): DataConstr =>
+export const oStewardClaim = (rect: Rect): DataConstr =>
     new DataConstr(1, [rectData(rect)]);
 // LovelacePerPixel spend: change=0 (no args; new price read from the output)
 export const oPriceChange = (): DataConstr => new DataConstr(0, []);
@@ -267,9 +267,9 @@ export function lockContract(): ContractBundle {
 export const lockedDatum = (): DataConstr => new DataConstr(0, [new DataI(0)]);
 
 // ---- marketplace -----------------------------------------------------------
-// params: [ ownershipPolicy: bytes ]
-export function marketplaceContract(ownershipPolicy: Uint8Array): ContractBundle {
-    return bundle(applyParams(flatOf("marketplace"), [ownershipPolicy]));
+// params: [ stewardshipPolicy: bytes ]
+export function marketplaceContract(stewardshipPolicy: Uint8Array): ContractBundle {
+    return bundle(applyParams(flatOf("marketplace"), [stewardshipPolicy]));
 }
 
 // datums (state declaration order): Listing = Constr 0 [ seller, pricePerPixel ],
